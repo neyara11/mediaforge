@@ -75,6 +75,8 @@ pub async fn save_generation(
     cost_rub: Option<f64>,
     generation_id: Option<String>,
 ) -> Result<(), String> {
+    eprintln!("[DB] save_generation id={}, endpoint={}, response_json_len={}", 
+        id, endpoint, response_json.as_ref().map(|s| s.len()).unwrap_or(0));
     sqlx::query(
         "INSERT INTO generations (id, project_id, model, endpoint, request_json, response_json, status, media_path, media_type, parent_id, cost_rub, generation_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

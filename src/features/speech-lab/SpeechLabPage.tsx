@@ -105,7 +105,6 @@ export default function SpeechLabPage() {
 
   const [ttsHistory, setTtsHistory] = useState<Generation[]>([]);
   const [sttHistory, setSttHistory] = useState<Generation[]>([]);
-  const [historyLoaded, setHistoryLoaded] = useState(false);
 
   const reloadHistory = useCallback(async () => {
     try {
@@ -126,9 +125,8 @@ export default function SpeechLabPage() {
         console.log(`Loaded ${gens.length} speech generations from DB`);
         setTtsHistory(gens.filter((g) => g.endpoint === "/v1/audio/speech"));
         setSttHistory(gens.filter((g) => g.endpoint === "/v1/audio/transcriptions"));
-        setHistoryLoaded(true);
       })
-      .catch(() => setHistoryLoaded(true));
+      .catch((e) => console.error("Failed to load speech history:", e));
     return () => { cancelled = true; };
   }, []);
 
@@ -426,11 +424,11 @@ export default function SpeechLabPage() {
             </div>
           )}
 
-          {historyLoaded && ttsHistory.length > 0 && (
+          {ttsHistory.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs font-medium text-zinc-500">
                 <Clock className="h-3.5 w-3.5" />
-                History
+                История
               </div>
               <div className="max-h-64 space-y-1 overflow-y-auto">
                 {ttsHistory.map((gen) => {
@@ -455,6 +453,13 @@ export default function SpeechLabPage() {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {ttsHistory.length === 0 && (
+            <div className="flex items-center gap-2 text-xs text-zinc-600">
+              <Clock className="h-3.5 w-3.5" />
+              История пуста — озвучьте текст
             </div>
           )}
         </div>
@@ -551,11 +556,11 @@ export default function SpeechLabPage() {
             </div>
           )}
 
-          {historyLoaded && sttHistory.length > 0 && (
+          {sttHistory.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs font-medium text-zinc-500">
                 <Clock className="h-3.5 w-3.5" />
-                History
+                История
               </div>
               <div className="max-h-64 space-y-1 overflow-y-auto">
                 {sttHistory.map((gen) => {
@@ -582,6 +587,13 @@ export default function SpeechLabPage() {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {sttHistory.length === 0 && (
+            <div className="flex items-center gap-2 text-xs text-zinc-600">
+              <Clock className="h-3.5 w-3.5" />
+              История пуста — расшифруйте аудио
             </div>
           )}
         </div>

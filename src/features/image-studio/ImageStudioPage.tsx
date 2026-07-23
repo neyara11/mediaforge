@@ -369,9 +369,9 @@ export default function ImageStudioPage() {
             <>
               <div className="mb-3 mt-6 flex items-center gap-2">
                 <History className="h-4 w-4 text-zinc-500" />
-                <span className="text-xs font-medium text-zinc-500">History</span>
+                <span className="text-xs font-medium text-zinc-500">История</span>
                 <div className="flex-1 border-t border-zinc-800" />
-                <span className="text-xs text-zinc-600">{historyImages.length} images</span>
+                <span className="text-xs text-zinc-600">{historyImages.length} изобр.</span>
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {historyImages.map((img) => (
@@ -394,6 +394,17 @@ export default function ImageStudioPage() {
                 ))}
               </div>
             </>
+          )}
+
+          {historyImages.length === 0 && !loading && (
+            <div className="mt-6 border-t border-zinc-800 pt-3">
+              <div className="flex items-center gap-2">
+                <History className="h-4 w-4 text-zinc-600" />
+                <span className="text-xs text-zinc-600">
+                  История пуста — сгенерируйте изображение
+                </span>
+              </div>
+            </div>
           )}
         </div>
       </div>

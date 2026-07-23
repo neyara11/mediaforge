@@ -506,11 +506,11 @@ Genre: ${genre}, Tempo: ${tempo}`,
             </div>
           </div>
 
-          {tracks.length > 0 && (
-            <div className="w-64 border-l border-zinc-800 p-4">
-              <h3 className="mb-3 text-sm font-medium text-zinc-400">
-                {isRu ? "Плейлист" : "Playlist"}
-              </h3>
+          <div className="w-64 border-l border-zinc-800 p-4">
+            <h3 className="mb-3 text-sm font-medium text-zinc-400">
+              {isRu ? "Плейлист" : "Playlist"}
+            </h3>
+            {tracks.length > 0 ? (
               <div className="space-y-2">
                 {tracks.map((track) => {
                   const isCurrent = currentTrack?.id === track.id;
@@ -546,8 +546,10 @@ Genre: ${genre}, Tempo: ${tempo}`,
                   );
                 })}
               </div>
-            </div>
-          )}
+            ) : (
+              <p className="text-xs text-zinc-600">{isRu ? "Пусто" : "Empty"}</p>
+            )}
+          </div>
         </div>
       </div>
 

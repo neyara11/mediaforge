@@ -38,6 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       return { success: true, balance: balance?.toString() };
     } catch (e) {
+      console.error("[Auth] testConnection failed:", e);
       return { success: false, error: String(e) };
     }
   }, []);

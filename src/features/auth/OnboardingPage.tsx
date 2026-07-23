@@ -131,6 +131,11 @@ export default function OnboardingPage() {
                         {t("balance")}: {connectionResult.balance} ₽
                       </p>
                     )}
+                    {connectionResult.error && (
+                      <p className="mt-1 text-xs opacity-60 font-mono">
+                        {connectionResult.error}
+                      </p>
+                    )}
                   </div>
                 </div>
               )}

@@ -16,7 +16,7 @@ export default function SpeechLabPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { defaultModel, setDefaultModel, models } = useDefaultModel("tts");
+  const { defaultModel, setDefaultModel, availableModels } = useDefaultModel("tts");
 
   const handleModelChange = (newModel: string) => {
     setDefaultModel(newModel);
@@ -93,7 +93,7 @@ export default function SpeechLabPage() {
               onChange={(e) => handleModelChange(e.target.value)}
               className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none"
             >
-              {models.map((m) => (
+              {availableModels.map((m) => (
                 <option key={m.id} value={m.id}>{m.name}</option>
               ))}
             </select>

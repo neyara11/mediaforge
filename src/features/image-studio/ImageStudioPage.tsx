@@ -21,7 +21,7 @@ export default function ImageStudioPage() {
   const [selected, setSelected] = useState<ImageResult | null>(null);
   const [showPromptBuilder, setShowPromptBuilder] = useState(false);
 
-  const { defaultModel, setDefaultModel, models } = useDefaultModel("image");
+  const { defaultModel, setDefaultModel, availableModels } = useDefaultModel("image");
 
   const handleModelChange = (newModel: string) => {
     setDefaultModel(newModel);
@@ -108,7 +108,7 @@ export default function ImageStudioPage() {
               onChange={(e) => handleModelChange(e.target.value)}
               className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-white outline-none"
             >
-              {models.map((m) => (
+              {availableModels.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}
                 </option>

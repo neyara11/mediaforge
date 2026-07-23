@@ -20,7 +20,7 @@ export default function VideoStudioPage() {
   const [tasks, setTasks] = useState<VideoTask[]>([]);
   const [showPromptBuilder, setShowPromptBuilder] = useState(false);
 
-  const { defaultModel, setDefaultModel, models } = useDefaultModel("video");
+  const { defaultModel, setDefaultModel, availableModels } = useDefaultModel("video");
 
   const handleModelChange = (newModel: string) => {
     setDefaultModel(newModel);
@@ -103,7 +103,7 @@ export default function VideoStudioPage() {
               onChange={(e) => handleModelChange(e.target.value)}
               className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-white outline-none"
             >
-              {models.map((m) => (
+              {availableModels.map((m) => (
                 <option key={m.id} value={m.id}>{m.name}</option>
               ))}
             </select>

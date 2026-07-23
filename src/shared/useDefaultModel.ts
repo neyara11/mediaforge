@@ -1,59 +1,98 @@
 import { useState, useEffect } from "react";
-import { getSetting } from "../db";
+import { getSetting, setSetting } from "../db";
 import { fetchModels } from "../api/endpoints/models";
 
-interface ModelOption {
+const MODALITY_KEYS = ["image", "video", "audio", "stt", "tts", "text"] as const;
+export type ModalityKey = (typeof MODALITY_KEYS)[number];
+
+const MODALITY_LABELS: Record<ModalityKey, string> = {
+  image: "Изображения",
+  video: "Видео",
+  audio: "Аудио",
+  stt: "Распознавание",
+  tts: "Озвучка",
+  text: "Текст",
+};
+
+const FALLBACKS: Record<ModalityKey, string> = {
+  image: "openai/gpt-image-1",
+  video: "bytedance/seedance-2.0",
+  audio: "google/lyria-3-clip",
+  stt: "openai/whisper-large-v3",
+  tts: "x-ai/grok-voice-tts-1.0",
+  text: "openai/gpt-4o",
+};
+
+export interface ModelOption {
   id: string;
   name: string;
 }
 
-export function useDefaultModel(modality: "image" | "tts" | "stt" | "video" | "audio" | "text") {
-  const [defaultModel, setDefaultModel] = useState<string>("");
-  const [models, setModels] = useState<ModelOption[]>([]);
+export function getAvailableModels(modality: ModalityKey): Promise<string[]> {
+  return getSetting(`available_${modality}_models`).then((v) => {
+    if (!v) return [FALLBACKS[modality]];
+    try {
+      const arr = JSON.parse(v);
+      return Array.isArray(arr) && arr.length > 0 ? arr : [FALLBACKS[modality]];
+    } catch {
+      return [FALLBACKS[modality]];
+    }
+  });
+}
+
+export function saveAvailableModels(modality: ModalityKey, ids: string[]): Promise<void> {
+  return setSetting(`available_${modality}_models`, JSON.stringify(ids));
+}
+
+export function useDefaultModel(modality: ModalityKey) {
+  const [defaultModel, setDefaultModel] = useState(FALLBACKS[modality]);
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
+  const [modelIds, setModelIds] = useState<string[]>([FALLBACKS[modality]]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [saved, result] = await Promise.all([
-          getSetting(`default_${modality}_model`).catch(() => null),
+        const [idsJson, result] = await Promise.all([
+          getSetting(`available_${modality}_models`),
           fetchModels(),
         ]);
-        const parsed = JSON.parse(result);
-        const allModels: ModelOption[] = (parsed?.data ?? []).map((m: { id: string; name?: string }) => ({
-          id: m.id,
-          name: m.name ?? m.id,
-        }));
-        setModels(allModels);
-        if (saved) {
-          setDefaultModel(saved);
-        } else {
-          const fallbacks: Record<string, string> = {
-            image: "openai/gpt-image-1",
-            tts: "x-ai/grok-voice-tts-1.0",
-            stt: "openai/whisper-large-v3",
-            video: "bytedance/seedance-2.0",
-            audio: "google/lyria-3-clip",
-            text: "openai/gpt-4o",
-          };
-          setDefaultModel(fallbacks[modality] ?? "");
+
+        let ids: string[] = [];
+        if (idsJson) {
+          try { ids = JSON.parse(idsJson); } catch { ids = [FALLBACKS[modality]]; }
         }
+        if (ids.length === 0) ids = [FALLBACKS[modality]];
+
+        const parsed = JSON.parse(result);
+        const allModels: Record<string, string> = {};
+        for (const m of (parsed?.data ?? [])) {
+          allModels[m.id] = m.name ?? m.id;
+        }
+
+        const options: ModelOption[] = ids.map((id: string) => ({
+          id,
+          name: allModels[id] ?? id,
+        }));
+
+        setModelIds(ids);
+        setAvailableModels(options);
+        setDefaultModel(ids[0]);
       } catch {
-        // use fallbacks
-        const fallbacks: Record<string, string> = {
-          image: "openai/gpt-image-1",
-          tts: "x-ai/grok-voice-tts-1.0",
-          stt: "openai/whisper-large-v3",
-          video: "bytedance/seedance-2.0",
-          audio: "google/lyria-3-clip",
-          text: "openai/gpt-4o",
-        };
-        setDefaultModel(fallbacks[modality] ?? "");
+        setAvailableModels([{ id: FALLBACKS[modality], name: FALLBACKS[modality] }]);
+        setDefaultModel(FALLBACKS[modality]);
       }
       setLoading(false);
     };
     load();
   }, [modality]);
 
-  return { defaultModel, setDefaultModel, models, loading };
+  const updateAvailable = async (ids: string[]) => {
+    await saveAvailableModels(modality, ids);
+    setModelIds(ids);
+  };
+
+  return { defaultModel, setDefaultModel, availableModels, modelIds, updateAvailable, loading };
 }
+
+export { MODALITY_KEYS, MODALITY_LABELS, FALLBACKS };

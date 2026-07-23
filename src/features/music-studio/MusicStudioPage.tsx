@@ -22,7 +22,7 @@ export default function MusicStudioPage() {
   const [lyrics, setLyrics] = useState("");
   const [showPromptBuilder, setShowPromptBuilder] = useState(false);
 
-  const { defaultModel, setDefaultModel, models } = useDefaultModel("audio");
+  const { defaultModel, setDefaultModel, availableModels } = useDefaultModel("audio");
 
   const handleModelChange = (newModel: string) => {
     setDefaultModel(newModel);
@@ -133,7 +133,7 @@ Return ONLY the lyrics with structure tags, no markdown. Genre: ${genre}, Tempo:
               onChange={(e) => handleModelChange(e.target.value)}
               className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-white outline-none"
             >
-              {models.map((m) => (
+              {availableModels.map((m) => (
                 <option key={m.id} value={m.id}>{m.name}</option>
               ))}
             </select>

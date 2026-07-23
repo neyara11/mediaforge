@@ -10,10 +10,10 @@ type Tab = "tts" | "stt";
 // Known voices per TTS model family. Key is a substring matched against model ID.
 const VOICE_MAP: Record<string, string[]> = {
   openai: ["alloy", "echo", "fable", "onyx", "nova", "shimmer"],
-  grok: ["eve", "adam", "nova", "sage", "lumen"],
+  grok: ["eve", "ara", "rex", "sal", "leo"],
   "elevenlabs": ["rachel", "domi", "bella", "antoni", "elli", "josh", "arnold", "adam", "sam"],
   minimax: ["male-qn-qingse", "female-qn-qingse", "male-qn-jingying", "presenter_male", "presenter_female"],
-  qwen: [],  // Qwen TTS may not support voice parameter — use empty string
+  qwen: ["loongjohn", "longanhuan_v3.6"],
 };
 
 function getVoicesForModel(modelId: string): string[] {
@@ -25,9 +25,8 @@ function getVoicesForModel(modelId: string): string[] {
   return ["alloy", "echo", "fable", "onyx", "nova", "shimmer"];
 }
 
-function isVoiceSupported(modelId: string): boolean {
-  const id = modelId.toLowerCase();
-  if (id.includes("qwen")) return false;
+function isVoiceSupported(_modelId: string): boolean {
+  // All known TTS models support voice selection
   return true;
 }
 

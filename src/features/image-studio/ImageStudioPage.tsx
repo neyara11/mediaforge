@@ -71,6 +71,11 @@ export default function ImageStudioPage() {
       try {
         const gens = await getGenerations();
         console.log(`Loaded ${gens.length} generations from DB`);
+        // Debug: show all endpoints
+        const endpoints = [...new Set(gens.map(g => g.endpoint))];
+        console.log("Endpoints in DB:", endpoints);
+        // Debug: show first 3 generations
+        console.log("Sample:", gens.slice(0, 3).map(g => ({ endpoint: g.endpoint, status: g.status, model: g.model })));
         const imageGens = gens.filter(
           (g) => g.endpoint === "/v1/images" && g.status === "completed",
         );

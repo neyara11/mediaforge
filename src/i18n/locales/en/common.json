@@ -1,0 +1,18 @@
+{
+  "nav": "Navigation",
+  "imageStudio": "Image Studio",
+  "speechLab": "Speech Lab",
+  "videoStudio": "Video Studio",
+  "musicStudio": "Music Studio",
+  "settings": "Settings",
+  "language": "Language",
+  "save": "Save",
+  "cancel": "Cancel",
+  "delete": "Delete",
+  "loading": "Loading...",
+  "error": "Error",
+  "retry": "Retry",
+  "close": "Close",
+  "back": "Back",
+  "next": "Next"
+}

@@ -1,0 +1,18 @@
+{
+  "nav": "Навигация",
+  "imageStudio": "Image Studio",
+  "speechLab": "Speech Lab",
+  "videoStudio": "Video Studio",
+  "musicStudio": "Music Studio",
+  "settings": "Настройки",
+  "language": "Язык",
+  "save": "Сохранить",
+  "cancel": "Отмена",
+  "delete": "Удалить",
+  "loading": "Загрузка...",
+  "error": "Ошибка",
+  "retry": "Повторить",
+  "close": "Закрыть",
+  "back": "Назад",
+  "next": "Далее"
+}

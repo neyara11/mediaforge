@@ -1,0 +1,12 @@
+{
+  "models": "Models",
+  "general": "General",
+  "monthlyLimit": "Monthly Limit",
+  "monthlyLimitDesc": "Maximum monthly spending (₽)",
+  "language": "Language",
+  "resetKey": "Reset API Key",
+  "resetKeyDesc": "Remove saved key and reconfigure",
+  "reset": "Reset",
+  "interface": "Interface",
+  "api": "API & Limits"
+}

@@ -3,7 +3,8 @@ import { Image, Download, SlidersHorizontal } from "lucide-react";
 import { generateImage } from "../../api/endpoints/images";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
-import { saveGeneration } from "../../db";
+import { useDefaultModel } from "../../shared/useDefaultModel";
+import { saveGeneration, setSetting } from "../../db";
 
 interface ImageResult {
   id: string;
@@ -13,7 +14,6 @@ interface ImageResult {
 
 export default function ImageStudioPage() {
   const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState("openai/gpt-image-1");
   const [size, setSize] = useState("1024x1024");
   const [quality, setQuality] = useState("standard");
   const [loading, setLoading] = useState(false);
@@ -21,13 +21,20 @@ export default function ImageStudioPage() {
   const [selected, setSelected] = useState<ImageResult | null>(null);
   const [showPromptBuilder, setShowPromptBuilder] = useState(false);
 
+  const { defaultModel, setDefaultModel, models } = useDefaultModel("image");
+
+  const handleModelChange = (newModel: string) => {
+    setDefaultModel(newModel);
+    setSetting("default_image_model", newModel).catch(() => {});
+  };
+
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
     setLoading(true);
     try {
       const result = await generateImage({
         prompt: prompt.trim(),
-        model,
+        model: defaultModel,
         n: 4,
         size,
         quality,
@@ -37,7 +44,7 @@ export default function ImageStudioPage() {
         (d: { b64_json?: string }, _i: number) => ({
           id: generateId(),
           b64: d.b64_json ?? "",
-          model,
+          model: defaultModel,
         }),
       );
       setResults(images);
@@ -47,9 +54,9 @@ export default function ImageStudioPage() {
       await saveGeneration({
         id: genId,
         projectId: null,
-        model,
+        model: defaultModel,
         endpoint: "/v1/images",
-        requestJson: JSON.stringify({ prompt, model, size, quality }),
+        requestJson: JSON.stringify({ prompt, model: defaultModel, size, quality }),
         status: "completed",
         mediaPath: null,
         mediaType: "image/png",
@@ -97,13 +104,15 @@ export default function ImageStudioPage() {
 
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
+              value={defaultModel}
+              onChange={(e) => handleModelChange(e.target.value)}
               className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-white outline-none"
             >
-              <option value="openai/gpt-image-1">GPT Image 1</option>
-              <option value="black-forest-labs/flux.2-pro">Flux 2 Pro</option>
-              <option value="bytedance/seedream-4.5">Seedream 4.5</option>
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
             </select>
             <select
               value={size}

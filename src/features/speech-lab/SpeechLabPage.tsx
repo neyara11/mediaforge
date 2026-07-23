@@ -2,19 +2,26 @@ import { useState, useRef } from "react";
 import { Volume2, Upload } from "lucide-react";
 import { textToSpeech } from "../../api/endpoints/speech";
 import { cn, generateId } from "../../shared/utils";
-import { saveGeneration } from "../../db";
+import { useDefaultModel } from "../../shared/useDefaultModel";
+import { saveGeneration, setSetting } from "../../db";
 
 type Tab = "tts" | "stt";
 
 export default function SpeechLabPage() {
   const [tab, setTab] = useState<Tab>("tts");
   const [ttsText, setTtsText] = useState("");
-  const [ttsModel, setTtsModel] = useState("x-ai/grok-voice-tts-1.0");
   const [ttsVoice, setTtsVoice] = useState("eve");
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { defaultModel, setDefaultModel, models } = useDefaultModel("tts");
+
+  const handleModelChange = (newModel: string) => {
+    setDefaultModel(newModel);
+    setSetting("default_tts_model", newModel).catch(() => {});
+  };
 
   const handleTts = async () => {
     if (!ttsText.trim()) return;
@@ -23,7 +30,7 @@ export default function SpeechLabPage() {
     try {
       const audioData = await textToSpeech({
         text: ttsText.trim(),
-        model: ttsModel,
+        model: defaultModel,
         voice: ttsVoice,
         format: "mp3",
       });
@@ -36,9 +43,9 @@ export default function SpeechLabPage() {
       await saveGeneration({
         id: genId,
         projectId: null,
-        model: ttsModel,
+        model: defaultModel,
         endpoint: "/v1/audio/speech",
-        requestJson: JSON.stringify({ text: ttsText, model: ttsModel, voice: ttsVoice }),
+        requestJson: JSON.stringify({ text: ttsText, model: defaultModel, voice: ttsVoice }),
         status: "completed",
         mediaPath: null,
         mediaType: "audio/mp3",
@@ -82,12 +89,13 @@ export default function SpeechLabPage() {
           />
           <div className="flex gap-3">
             <select
-              value={ttsModel}
-              onChange={(e) => setTtsModel(e.target.value)}
+              value={defaultModel}
+              onChange={(e) => handleModelChange(e.target.value)}
               className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none"
             >
-              <option value="x-ai/grok-voice-tts-1.0">Grok Voice TTS</option>
-              <option value="openai/gpt-4o-audio">GPT-4o Audio</option>
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
             </select>
             <select
               value={ttsVoice}

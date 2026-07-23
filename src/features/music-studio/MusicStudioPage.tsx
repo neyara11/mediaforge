@@ -3,25 +3,31 @@ import { Music, Play, Pause } from "lucide-react";
 import { chatCompletion } from "../../api/endpoints/chat";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
-import { saveGeneration } from "../../db";
+import { useDefaultModel } from "../../shared/useDefaultModel";
+import { saveGeneration, setSetting } from "../../db";
 import type { ChatMessage } from "../../api/types";
 
 interface Track {
   id: string;
   name: string;
-  audioUrl: string | null;
 }
 
 export default function MusicStudioPage() {
   const [prompt, setPrompt] = useState("");
   const [genre, setGenre] = useState("pop");
   const [tempo, setTempo] = useState("120");
-  const [model, setModel] = useState("google/lyria-3-clip");
   const [loading, setLoading] = useState(false);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [lyrics, setLyrics] = useState("");
   const [showPromptBuilder, setShowPromptBuilder] = useState(false);
+
+  const { defaultModel, setDefaultModel, models } = useDefaultModel("audio");
+
+  const handleModelChange = (newModel: string) => {
+    setDefaultModel(newModel);
+    setSetting("default_audio_model", newModel).catch(() => {});
+  };
 
   const handleGenerateLyrics = async () => {
     if (!prompt.trim()) return;
@@ -58,15 +64,14 @@ Return ONLY the lyrics with structure tags, no markdown. Genre: ${genre}, Tempo:
       const newTrack: Track = {
         id: trackId,
         name: `Track ${tracks.length + 1} — ${genre}`,
-        audioUrl: null,
       };
       setTracks((prev) => [...prev, newTrack]);
       await saveGeneration({
         id: trackId,
         projectId: null,
-        model,
+        model: defaultModel,
         endpoint: "/v1/chat/completions",
-        requestJson: JSON.stringify({ prompt, genre, tempo, model }),
+        requestJson: JSON.stringify({ prompt, genre, tempo, model: defaultModel }),
         status: "completed",
         mediaPath: null,
         mediaType: "audio/mp3",
@@ -124,12 +129,13 @@ Return ONLY the lyrics with structure tags, no markdown. Genre: ${genre}, Tempo:
               className="w-20 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-white outline-none focus:border-violet-500"
             />
             <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
+              value={defaultModel}
+              onChange={(e) => handleModelChange(e.target.value)}
               className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-white outline-none"
             >
-              <option value="google/lyria-3-clip">Lyria 3 Clip</option>
-              <option value="google/lyria-3-pro">Lyria 3 Pro</option>
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
             </select>
             <button
               onClick={handleGenerateLyrics}

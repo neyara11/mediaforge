@@ -3,7 +3,8 @@ import { Video, Clock } from "lucide-react";
 import { createVideo } from "../../api/endpoints/videos";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
-import { saveGeneration } from "../../db";
+import { useDefaultModel } from "../../shared/useDefaultModel";
+import { saveGeneration, setSetting } from "../../db";
 
 interface VideoTask {
   id: string;
@@ -11,15 +12,20 @@ interface VideoTask {
   model: string;
   status: "pending" | "processing" | "completed" | "failed";
   remoteId: string | null;
-  elapsed: number;
 }
 
 export default function VideoStudioPage() {
   const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState("bytedance/seedance-2.0");
   const [duration, setDuration] = useState(8);
   const [tasks, setTasks] = useState<VideoTask[]>([]);
   const [showPromptBuilder, setShowPromptBuilder] = useState(false);
+
+  const { defaultModel, setDefaultModel, models } = useDefaultModel("video");
+
+  const handleModelChange = (newModel: string) => {
+    setDefaultModel(newModel);
+    setSetting("default_video_model", newModel).catch(() => {});
+  };
 
   const handleCreate = async () => {
     if (!prompt.trim()) return;
@@ -27,17 +33,16 @@ export default function VideoStudioPage() {
     const newTask: VideoTask = {
       id: taskId,
       prompt: prompt.trim(),
-      model,
+      model: defaultModel,
       status: "pending",
       remoteId: null,
-      elapsed: 0,
     };
     setTasks((prev) => [newTask, ...prev]);
 
     try {
       const result = await createVideo({
         prompt: prompt.trim(),
-        model,
+        model: defaultModel,
         duration,
       });
       const parsed = JSON.parse(result);
@@ -50,9 +55,9 @@ export default function VideoStudioPage() {
       await saveGeneration({
         id: taskId,
         projectId: null,
-        model,
+        model: defaultModel,
         endpoint: "/v1/videos",
-        requestJson: JSON.stringify({ prompt: prompt.trim(), model, duration }),
+        requestJson: JSON.stringify({ prompt: prompt.trim(), model: defaultModel, duration }),
         status: "processing",
         mediaPath: null,
         mediaType: "video/mp4",
@@ -94,13 +99,13 @@ export default function VideoStudioPage() {
 
           <div className="mt-3 flex items-center gap-3">
             <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
+              value={defaultModel}
+              onChange={(e) => handleModelChange(e.target.value)}
               className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-white outline-none"
             >
-              <option value="bytedance/seedance-2.0">Seedance 2.0</option>
-              <option value="openai/sora-2">Sora 2</option>
-              <option value="google/veo-3.1">Veo 3.1</option>
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
             </select>
             <select
               value={duration}
@@ -133,18 +138,11 @@ export default function VideoStudioPage() {
 
           <div className="space-y-3">
             {tasks.map((task) => (
-              <div
-                key={task.id}
-                className="rounded-lg border border-zinc-800 bg-zinc-900 p-4"
-              >
+              <div key={task.id} className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-zinc-300 line-clamp-1">
-                      {task.prompt}
-                    </p>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      {task.model}
-                    </p>
+                    <p className="line-clamp-1 text-sm text-zinc-300">{task.prompt}</p>
+                    <p className="mt-1 text-xs text-zinc-500">{task.model}</p>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-2 text-xs text-zinc-500">
@@ -165,7 +163,7 @@ export default function VideoStudioPage() {
                           : task.status === "failed"
                             ? "bg-red-400"
                             : task.status === "processing"
-                              ? "bg-amber-400 animate-pulse"
+                              ? "animate-pulse bg-amber-400"
                               : "bg-zinc-600",
                       )}
                     />
@@ -173,7 +171,7 @@ export default function VideoStudioPage() {
                 </div>
                 {task.status === "processing" && (
                   <div className="mt-3 h-1 overflow-hidden rounded-full bg-zinc-800">
-                    <div className="h-full w-1/2 animate-progress rounded-full bg-violet-500" />
+                    <div className="animate-progress h-full rounded-full bg-violet-500" />
                   </div>
                 )}
               </div>

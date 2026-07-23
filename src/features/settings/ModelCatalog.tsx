@@ -42,9 +42,10 @@ function getModality(model: RouterAIModel): ModalityFilter {
 
   if (outputs.includes("image") || id.includes("image") || id.includes("flux") || id.includes("seedream") || id.includes("dall-e")) return "image";
   if (outputs.includes("video") || id.includes("video") || id.includes("seedance") || id.includes("sora") || id.includes("veo")) return "video";
-  if (id.includes("whisper") || id.includes("stt") || name.includes("whisper") || name.includes("transcrib")) return "stt";
-  if (id.includes("tts") || id.includes("voice") || id.includes("speech") || name.includes("tts") || name.includes("speech")) return "tts";
-  if (outputs.includes("audio") || id.includes("lyria") || id.includes("music") || id.includes("audio")) return "audio";
+  if (id.includes("lyria") || id.includes("music") || name.includes("music") || name.includes("lyria")) return "audio";
+  if (id.includes("whisper") || id.includes("stt") || name.includes("whisper") || name.includes("transcrib") || name.includes("translat")) return "stt";
+  if (id.includes("tts") || name.includes("tts") || (outputs.includes("audio") && (id.includes("voice") || name.includes("voice") || name.includes("speech")))) return "tts";
+  if (outputs.includes("audio")) return "audio";
   return "text";
 }
 
@@ -70,6 +71,7 @@ export default function ModelCatalog() {
       const result = await fetchModels();
       const parsed = JSON.parse(result);
       const data = (parsed?.data ?? []).slice(0, 200);
+      console.debug("[ModelCatalog] loaded", data.length, "models, first 3 ids:", data.slice(0, 3).map((m: RouterAIModel) => m.id));
       setModels(data);
       saveModelsCache(JSON.stringify(data)).catch(() => {});
     } catch {

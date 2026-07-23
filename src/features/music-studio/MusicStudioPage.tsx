@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Music, Play, Pause, Sparkles } from "lucide-react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { chatCompletion, chatAudioGenerate } from "../../api/endpoints/chat";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
@@ -13,7 +12,7 @@ interface Track {
   id: string;
   name: string;
   genre: string;
-  wavPath: string | null;
+  lyrics: string;
 }
 
 export default function MusicStudioPage() {
@@ -80,16 +79,18 @@ Genre: ${genre}, Tempo: ${tempo}`,
     setError(null);
     try {
       const trackPrompt = lyrics || prompt;
-      const wavPath = await chatAudioGenerate(trackPrompt, audioModel.defaultModel);
+      const songLyrics = await chatAudioGenerate(trackPrompt, audioModel.defaultModel);
 
       const trackId = generateId();
       const newTrack: Track = {
         id: trackId,
         name: `Track ${tracks.length + 1} — ${genre}`,
         genre,
-        wavPath,
+        lyrics: songLyrics,
       };
       setTracks((prev) => [...prev, newTrack]);
+      setCurrentTrack(newTrack);
+      setLyrics(songLyrics);
 
       await saveGeneration({
         id: trackId,
@@ -98,8 +99,8 @@ Genre: ${genre}, Tempo: ${tempo}`,
         endpoint: "/v1/chat/completions",
         requestJson: JSON.stringify({ prompt: trackPrompt, genre, tempo, model: audioModel.defaultModel }),
         status: "completed",
-        mediaPath: wavPath,
-        mediaType: "audio/wav",
+        mediaPath: null,
+        mediaType: "text/lyrics",
         parentId: null,
         costRub: null,
         generationId: null,
@@ -249,15 +250,6 @@ Genre: ${genre}, Tempo: ${tempo}`,
                   </button>
                 ))}
               </div>
-              {currentTrack?.wavPath && (
-                <div className="mt-3">
-                  <audio
-                    controls
-                    className="w-full"
-                    src={convertFileSrc(currentTrack.wavPath)}
-                  />
-                </div>
-              )}
             </div>
           )}
         </div>

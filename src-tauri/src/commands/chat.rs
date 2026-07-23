@@ -1,5 +1,4 @@
 use tauri::State;
-use tauri::Manager;
 use serde_json::json;
 
 use crate::api::client::{ApiState, api_post_stream, api_post};
@@ -24,7 +23,6 @@ pub async fn chat_completion(
 
 #[tauri::command]
 pub async fn chat_audio_generate(
-    app: tauri::AppHandle,
     state: State<'_, ApiState>,
     prompt: String,
     model: String,
@@ -42,96 +40,41 @@ pub async fn chat_audio_generate(
 
     let raw = api_post_stream(&state, "/chat/completions", &body.to_string()).await?;
 
-    eprintln!("[Audio SSE] raw response length: {}, first 300 chars: {:?}", raw.len(), &raw[..raw.len().min(300)]);
+    let preview: String = raw.chars().take(500).collect();
+    eprintln!("[Audio SSE] raw len: {}, preview:\n{}", raw.len(), preview);
 
-    let mut pcm_buffer: Vec<i16> = Vec::new();
-    let sample_rate = 24000u32;
+    let mut lyrics_text = String::new();
     let mut sse_count = 0u32;
 
     for line in raw.lines() {
         let line = line.trim();
-        if line.is_empty() || line == "data: [DONE]" {
+        if line.is_empty() || line.starts_with(':') {
             continue;
         }
         if let Some(data) = line.strip_prefix("data: ") {
+            if data == "[DONE]" { break; }
             sse_count += 1;
-            if sse_count == 1 {
-                eprintln!("[Audio SSE] first SSE data: {}", &data[..data.len().min(300)]);
-            }
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
-                let audio_b64 = parsed["choices"]
+                if let Some(content) = parsed["choices"]
                     .as_array()
                     .and_then(|c| c.first())
-                    .and_then(|c| c["delta"]["audio"].as_str())
-                    .or_else(|| parsed["audio"].as_str())
-                    .or_else(|| parsed["delta"].as_str());
-
-                if let Some(b64) = audio_b64 {
-                    if let Ok(bytes) = base64_decode(b64) {
-                        for chunk in bytes.chunks_exact(2) {
-                            if chunk.len() == 2 {
-                                pcm_buffer.push(i16::from_le_bytes([chunk[0], chunk[1]]));
-                            }
-                        }
-                    }
-                } else if sse_count == 1 {
-                    if let Some(obj) = parsed.as_object() {
-                        eprintln!("[Audio SSE] no audio found, JSON keys: {:?}", obj.keys().collect::<Vec<_>>());
-                    }
+                    .and_then(|c| c["delta"]["content"].as_str())
+                {
+                    lyrics_text.push_str(content);
                 }
             }
         }
     }
 
-    eprintln!("[Audio SSE] lines processed, sse events: {}, pcm samples: {}", sse_count, pcm_buffer.len());
-
-    if pcm_buffer.is_empty() {
-        return Err("No audio data received from API".to_string());
+    if sse_count == 0 {
+        return Err("No SSE events received".to_string());
     }
 
-    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let audio_dir = app_dir.join("media").join("audio").join("mp3");
-    std::fs::create_dir_all(&audio_dir).map_err(|e| e.to_string())?;
-
-    let filename = format!("{}.wav", uuid::Uuid::new_v4());
-    let wav_path = audio_dir.join(&filename);
-
-    write_wav(&wav_path, &pcm_buffer, sample_rate)?;
-
-    Ok(wav_path.to_string_lossy().to_string())
-}
-
-fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
-    use base64::Engine;
-    base64::engine::general_purpose::STANDARD
-        .decode(input)
-        .map_err(|e| format!("Base64 decode error: {}", e))
-}
-
-fn write_wav(path: &std::path::Path, samples: &[i16], sample_rate: u32) -> Result<(), String> {
-    use std::io::Write;
-    let mut file = std::fs::File::create(path).map_err(|e| e.to_string())?;
-
-    let data_size = (samples.len() * 2) as u32;
-    let file_size = 36 + data_size;
-
-    file.write_all(b"RIFF").map_err(|e| e.to_string())?;
-    file.write_all(&file_size.to_le_bytes()).map_err(|e| e.to_string())?;
-    file.write_all(b"WAVE").map_err(|e| e.to_string())?;
-    file.write_all(b"fmt ").map_err(|e| e.to_string())?;
-    file.write_all(&16u32.to_le_bytes()).map_err(|e| e.to_string())?;
-    file.write_all(&1u16.to_le_bytes()).map_err(|e| e.to_string())?;
-    file.write_all(&1u16.to_le_bytes()).map_err(|e| e.to_string())?;
-    file.write_all(&sample_rate.to_le_bytes()).map_err(|e| e.to_string())?;
-    file.write_all(&(sample_rate * 2).to_le_bytes()).map_err(|e| e.to_string())?;
-    file.write_all(&2u16.to_le_bytes()).map_err(|e| e.to_string())?;
-    file.write_all(&16u16.to_le_bytes()).map_err(|e| e.to_string())?;
-    file.write_all(b"data").map_err(|e| e.to_string())?;
-    file.write_all(&data_size.to_le_bytes()).map_err(|e| e.to_string())?;
-
-    for &sample in samples {
-        file.write_all(&sample.to_le_bytes()).map_err(|e| e.to_string())?;
+    if lyrics_text.is_empty() {
+        return Err(format!("Received {} SSE events but no text content. Check delta field format.", sse_count));
     }
 
-    Ok(())
+    eprintln!("[Audio SSE] collected lyrics ({} chars):\n{}", lyrics_text.len(), &lyrics_text[..lyrics_text.len().min(500)]);
+
+    Ok(lyrics_text)
 }

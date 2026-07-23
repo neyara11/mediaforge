@@ -97,7 +97,10 @@ export default function ImageStudioPage() {
     setError(null);
     try {
       const inputRefs = referenceImage
-        ? [{ type: "image" as const, data: referenceImage.data }]
+        ? [{
+            type: "image_url" as const,
+            image_url: { url: `data:image/png;base64,${referenceImage.data}` },
+          }]
         : undefined;
 
       const result = await generateImage({

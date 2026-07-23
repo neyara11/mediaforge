@@ -37,7 +37,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "PLACEHOLDER_PUBKEY_WILL_BE_GENERATED_ON_BUILD",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEREMkEwMkU0NzAyMDg3OTkKUldTWmh5Qnc1QUlxM1lEck5DaHBiUFp3NnlqanZXTjFYVHgyeE5uVU05VFFKUWJ1Q1pOMEhtVXYK",
       "endpoints": [
         "https://github.com/neyara11/mediaforge/releases/latest/download/latest.json"
       ]

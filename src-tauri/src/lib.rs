@@ -28,12 +28,15 @@ pub fn run() {
             db::init_dirs(&handle)?;
 
             let db_path = db::get_db_path(&handle)?;
-            let db_url = format!("sqlite:{}", db_path.to_string_lossy());
             let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Runtime error: {}", e))?;
             rt.block_on(async {
                 let pool = sqlx::sqlite::SqlitePoolOptions::new()
                     .max_connections(5)
-                    .connect(&db_url)
+                    .connect_with(
+                        sqlx::sqlite::SqliteConnectOptions::new()
+                            .filename(&db_path)
+                            .create_if_missing(true),
+                    )
                     .await
                     .map_err(|e| format!("DB connection error: {}", e))?;
                 sqlx::query(db::SCHEMA)

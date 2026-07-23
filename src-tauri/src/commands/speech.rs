@@ -33,11 +33,20 @@ pub async fn speech_to_text(
     model: String,
     language: Option<String>,
 ) -> Result<String, String> {
-    let body = json!({
+    use base64::Engine as _;
+    let audio_bytes = std::fs::read(&file_path)
+        .map_err(|e| format!("Failed to read audio file: {}", e))?;
+    let audio_b64 = base64::engine::general_purpose::STANDARD.encode(&audio_bytes);
+
+    let mut body = json!({
         "model": model,
-        "file": file_path,
-        "language": language,
+        "input_audio": audio_b64,
         "response_format": "verbose_json",
     });
+    if let Some(ref lang) = language {
+        if !lang.is_empty() {
+            body["language"] = json!(lang);
+        }
+    }
     api_post(&state, "/audio/transcriptions", &body.to_string()).await
 }

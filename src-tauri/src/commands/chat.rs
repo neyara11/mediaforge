@@ -45,6 +45,7 @@ pub async fn chat_audio_generate(
 
     let mut lyrics_text = String::new();
     let mut audio_base64 = String::new();
+    let mut cost: Option<f64> = None;
     let mut sse_count = 0u32;
     let mut audio_chunks = 0u32;
     let mut text_chunks = 0u32;
@@ -60,16 +61,19 @@ pub async fn chat_audio_generate(
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
                 if let Some(choices) = parsed["choices"].as_array() {
                     if let Some(first) = choices.first() {
-                        // Collect text/lyrics from delta.content
                         if let Some(content) = first["delta"]["content"].as_str() {
                             lyrics_text.push_str(content);
                             text_chunks += 1;
                         }
-                        // Collect base64 audio from delta.audio.data
                         if let Some(audio_data) = first["delta"]["audio"]["data"].as_str() {
                             audio_base64.push_str(audio_data);
                             audio_chunks += 1;
                         }
+                    }
+                }
+                if cost.is_none() {
+                    if let Some(c) = parsed["usage"]["cost"].as_f64() {
+                        cost = Some(c);
                     }
                 }
             }
@@ -106,6 +110,7 @@ pub async fn chat_audio_generate(
         "lyrics": lyrics_text,
         "audio_base64": audio_base64,
         "audio_format": "mp3",
+        "cost": cost,
     });
 
     Ok(result.to_string())

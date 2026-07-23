@@ -1,7 +1,7 @@
 use tauri::State;
 use serde_json::json;
 
-use crate::api::client::{ApiState, api_post, api_get};
+use crate::api::client::{ApiState, api_post, api_get, api_get_bytes};
 
 #[tauri::command]
 pub async fn create_video(
@@ -32,6 +32,6 @@ pub async fn poll_video(
 pub async fn download_video(
     state: State<'_, ApiState>,
     video_id: String,
-) -> Result<String, String> {
-    api_get(&state, &format!("/videos/{}/content", video_id)).await
+) -> Result<Vec<u8>, String> {
+    api_get_bytes(&state, &format!("/videos/{}/content", video_id)).await
 }

@@ -82,6 +82,57 @@ pub async fn api_get(
     .await
 }
 
+pub async fn api_get_bytes(
+    state: &ApiState,
+    path: &str,
+) -> Result<Vec<u8>, String> {
+    let url = format!("{}{}", state.base_url, path);
+    let api_key = {
+        state
+            .api_key
+            .read()
+            .map_err(|e| e.to_string())?
+            .clone()
+            .ok_or_else(|| "API key not set".to_string())?
+    };
+    let client = create_client();
+
+    with_retry(
+        || {
+            let client = client.clone();
+            let url = url.clone();
+            let api_key = api_key.clone();
+            async move {
+                let resp = client
+                    .get(&url)
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .send()
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                let status = resp.status().as_u16();
+                if status == 402 {
+                    return Err("Insufficient balance".to_string());
+                }
+                if should_retry(status) {
+                    if is_rate_limit(status) {
+                        return Err("Rate limited".to_string());
+                    }
+                    return Err(format!("Server error {}", status));
+                }
+                if !resp.status().is_success() {
+                    let body = resp.text().await.unwrap_or_default();
+                    return Err(format!("API error {}: {}", status, body));
+                }
+
+                resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
+            }
+        },
+        3,
+    )
+    .await
+}
+
 pub async fn api_post(
     state: &ApiState,
     path: &str,
@@ -153,25 +204,43 @@ pub async fn api_post_binary(
     };
     let client = create_client();
 
-    let resp = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
-        .body(body.to_string())
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    with_retry(
+        || {
+            let client = client.clone();
+            let url = url.clone();
+            let api_key = api_key.clone();
+            let body = body.to_string();
+            async move {
+                let resp = client
+                    .post(&url)
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .header("Content-Type", "application/json")
+                    .body(body)
+                    .send()
+                    .await
+                    .map_err(|e| e.to_string())?;
 
-    let status = resp.status().as_u16();
-    if status == 402 {
-        return Err("Insufficient balance".to_string());
-    }
-    if !resp.status().is_success() {
-        let err_body = resp.text().await.unwrap_or_default();
-        return Err(format!("API error {}: {}", status, err_body));
-    }
+                let status = resp.status().as_u16();
+                if status == 402 {
+                    return Err("Insufficient balance".to_string());
+                }
+                if should_retry(status) {
+                    if is_rate_limit(status) {
+                        return Err("Rate limited".to_string());
+                    }
+                    return Err(format!("Server error {}", status));
+                }
+                if !resp.status().is_success() {
+                    let err_body = resp.text().await.unwrap_or_default();
+                    return Err(format!("API error {}: {}", status, err_body));
+                }
 
-    resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
+                resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
+            }
+        },
+        3,
+    )
+    .await
 }
 
 pub async fn api_post_stream(
@@ -190,31 +259,52 @@ pub async fn api_post_stream(
     };
     let client = create_client();
 
-    let resp = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
-        .body(body_json.to_string())
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    with_retry(
+        || {
+            let client = client.clone();
+            let url = url.clone();
+            let api_key = api_key.clone();
+            let body_json = body_json.to_string();
+            async move {
+                let resp = client
+                    .post(&url)
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .header("Content-Type", "application/json")
+                    .body(body_json)
+                    .send()
+                    .await
+                    .map_err(|e| e.to_string())?;
 
-    let status = resp.status().as_u16();
-    if !resp.status().is_success() {
-        let err_body = resp.text().await.unwrap_or_default();
-        return Err(format!("API error {}: {}", status, err_body));
-    }
+                let status = resp.status().as_u16();
+                if status == 402 {
+                    return Err("Insufficient balance".to_string());
+                }
+                if should_retry(status) {
+                    if is_rate_limit(status) {
+                        return Err("Rate limited".to_string());
+                    }
+                    return Err(format!("Server error {}", status));
+                }
+                if !resp.status().is_success() {
+                    let err_body = resp.text().await.unwrap_or_default();
+                    return Err(format!("API error {}: {}", status, err_body));
+                }
 
-    let content_type = resp
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("unknown")
-        .to_string();
+                let content_type = resp
+                    .headers()
+                    .get("content-type")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("unknown")
+                    .to_string();
 
-    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+                let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
 
-    eprintln!("[API Stream] status={}, content-type={}, len={}", status, content_type, bytes.len());
+                eprintln!("[API Stream] status={}, content-type={}, len={}", status, content_type, bytes.len());
 
-    String::from_utf8(bytes.to_vec()).map_err(|e| format!("UTF-8 error: {} (first 100 bytes: {:?})", e, &bytes[..bytes.len().min(100)]))
+                String::from_utf8(bytes.to_vec()).map_err(|e| format!("UTF-8 error: {} (first 100 bytes: {:?})", e, &bytes[..bytes.len().min(100)]))
+            }
+        },
+        3,
+    )
+    .await
 }

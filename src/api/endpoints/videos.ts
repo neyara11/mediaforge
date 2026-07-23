@@ -14,6 +14,6 @@ export async function pollVideo(videoId: string): Promise<string> {
   return apiInvoke("poll_video", { videoId });
 }
 
-export async function downloadVideo(videoId: string): Promise<string> {
+export async function downloadVideo(videoId: string): Promise<number[]> {
   return apiInvoke("download_video", { videoId });
 }

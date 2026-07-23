@@ -1,9 +1,15 @@
+export interface ImageReference {
+  type: "image";
+  data: string;
+}
+
 export interface ImageGenerationParams {
   prompt: string;
   model: string;
   n?: number;
   size?: string;
   quality?: string;
+  input_references?: ImageReference[];
 }
 
 export interface SpeechParams {
@@ -49,4 +55,5 @@ export interface AudioGenerationResult {
   lyrics: string;
   audio_base64: string;
   audio_format: "mp3" | "wav";
+  cost: number | null;
 }

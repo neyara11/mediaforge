@@ -246,7 +246,7 @@ Genre: ${genre}, Tempo: ${tempo}`,
         mediaPath: audioUrl,
         mediaType: result.audio_base64 ? `audio/${result.audio_format}` : "text/lyrics",
         parentId: null,
-        costRub: null,
+        costRub: result.cost,
         generationId: null,
       });
     } catch (e) {

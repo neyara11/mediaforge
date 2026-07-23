@@ -11,8 +11,9 @@ pub async fn generate_image(
     n: Option<u32>,
     size: Option<String>,
     quality: Option<String>,
+    input_references: Option<Vec<serde_json::Value>>,
 ) -> Result<String, String> {
-    let body = json!({
+    let mut body = json!({
         "model": model,
         "prompt": prompt,
         "n": n.unwrap_or(1),
@@ -20,6 +21,11 @@ pub async fn generate_image(
         "quality": quality.unwrap_or_else(|| "standard".to_string()),
         "response_format": "b64_json"
     });
+    if let Some(refs) = input_references {
+        if !refs.is_empty() {
+            body["input_references"] = serde_json::Value::Array(refs);
+        }
+    }
     api_post(&state, "/images", &body.to_string()).await
 }
 

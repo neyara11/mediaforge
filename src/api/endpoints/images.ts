@@ -8,6 +8,7 @@ export async function generateImage(params: ImageGenerationParams): Promise<stri
     n: params.n ?? 1,
     size: params.size ?? "1024x1024",
     quality: params.quality ?? "standard",
+    inputReferences: params.input_references ?? null,
   });
 }
 

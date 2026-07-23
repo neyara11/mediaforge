@@ -77,7 +77,9 @@ export function useDefaultModel(modality: ModalityKey) {
 
         setModelIds(ids);
         setAvailableModels(options);
-        setDefaultModel(ids[0]);
+
+        const savedDefault = await getSetting(`default_${modality}_model`);
+        setDefaultModel(savedDefault && ids.includes(savedDefault) ? savedDefault : ids[0]);
       } catch {
         setAvailableModels([{ id: FALLBACKS[modality], name: FALLBACKS[modality] }]);
         setDefaultModel(FALLBACKS[modality]);

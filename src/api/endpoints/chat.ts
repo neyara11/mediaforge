@@ -19,5 +19,6 @@ export async function chatAudioGenerate(
     lyrics: parsed.lyrics || "",
     audio_base64: parsed.audio_base64 || "",
     audio_format: parsed.audio_format || "mp3",
+    cost: parsed.cost ?? null,
   };
 }

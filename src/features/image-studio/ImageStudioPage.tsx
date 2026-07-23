@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Image, Download, SlidersHorizontal } from "lucide-react";
+import { useState, useRef, useCallback } from "react";
+import { Image, Download, SlidersHorizontal, Upload, X } from "lucide-react";
 import { generateImage } from "../../api/endpoints/images";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
@@ -12,6 +12,28 @@ interface ImageResult {
   model: string;
 }
 
+interface ReferenceImage {
+  data: string;
+  previewUrl: string;
+  fileName: string;
+}
+
+function fileToBase64(file: File): Promise<ReferenceImage> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve({
+        data: result.split(",")[1] ?? "",
+        previewUrl: result,
+        fileName: file.name,
+      });
+    };
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function ImageStudioPage() {
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState("1024x1024");
@@ -20,6 +42,10 @@ export default function ImageStudioPage() {
   const [results, setResults] = useState<ImageResult[]>([]);
   const [selected, setSelected] = useState<ImageResult | null>(null);
   const [showPromptBuilder, setShowPromptBuilder] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [referenceImage, setReferenceImage] = useState<ReferenceImage | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { defaultModel, setDefaultModel, availableModels } = useDefaultModel("image");
 
@@ -28,16 +54,43 @@ export default function ImageStudioPage() {
     setSetting("default_image_model", newModel).catch(() => {});
   };
 
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const ref = await fileToBase64(file);
+      setReferenceImage(ref);
+    } catch {
+      setError("Failed to read reference image");
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, []);
+
+  const handleRemoveReference = useCallback(() => {
+    setReferenceImage(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, []);
+
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
     setLoading(true);
+    setError(null);
     try {
+      const inputRefs = referenceImage
+        ? [{ type: "image" as const, data: referenceImage.data }]
+        : undefined;
+
       const result = await generateImage({
         prompt: prompt.trim(),
         model: defaultModel,
         n: 4,
         size,
         quality,
+        input_references: inputRefs,
       });
       const parsed = JSON.parse(result);
       const images: ImageResult[] = (parsed?.data ?? []).map(
@@ -65,6 +118,7 @@ export default function ImageStudioPage() {
         generationId: parsed?.generation_id ?? null,
       });
     } catch (e) {
+      setError(String(e));
       console.error("Generation failed:", e);
     }
     setLoading(false);
@@ -102,6 +156,28 @@ export default function ImageStudioPage() {
             </button>
           </div>
 
+          {referenceImage && (
+            <div className="mt-3 flex items-center gap-3">
+              <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-zinc-700">
+                <img
+                  src={referenceImage.previewUrl}
+                  alt="Reference"
+                  className="h-full w-full object-cover"
+                />
+              </div>
+              <span className="min-w-0 flex-1 truncate text-xs text-zinc-500">
+                {referenceImage.fileName}
+              </span>
+              <button
+                onClick={handleRemoveReference}
+                className="rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
+                title="Remove reference image"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <select
               value={defaultModel}
@@ -133,6 +209,21 @@ export default function ImageStudioPage() {
               <option value="medium">Medium</option>
               <option value="high">High</option>
             </select>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-violet-500 hover:text-zinc-300"
+              title="Upload reference image"
+            >
+              <Upload className="mr-1 inline-block h-3.5 w-3.5" />
+              Reference
+            </button>
             <button
               onClick={handleGenerate}
               disabled={!prompt.trim() || loading}
@@ -142,6 +233,10 @@ export default function ImageStudioPage() {
             </button>
           </div>
         </div>
+
+        {error && (
+          <div className="mx-4 mt-4 rounded-lg bg-red-500/10 p-3 text-sm text-red-400">{error}</div>
+        )}
 
         <div className="flex-1 overflow-auto p-4">
           {selected && (
@@ -188,7 +283,7 @@ export default function ImageStudioPage() {
             </div>
           )}
 
-          {!loading && results.length === 0 && (
+          {!loading && results.length === 0 && !error && (
             <div className="flex h-64 items-center justify-center text-zinc-600">
               <div className="text-center">
                 <Image className="mx-auto mb-3 h-8 w-8 opacity-50" />

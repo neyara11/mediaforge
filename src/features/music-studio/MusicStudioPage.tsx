@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Music, Play, Pause, Sparkles } from "lucide-react";
-import { chatCompletion } from "../../api/endpoints/chat";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { chatCompletion, chatAudioGenerate } from "../../api/endpoints/chat";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
 import { useDefaultModel } from "../../shared/useDefaultModel";
@@ -12,6 +13,7 @@ interface Track {
   id: string;
   name: string;
   genre: string;
+  wavPath: string | null;
 }
 
 export default function MusicStudioPage() {
@@ -78,24 +80,14 @@ Genre: ${genre}, Tempo: ${tempo}`,
     setError(null);
     try {
       const trackPrompt = lyrics || prompt;
-      const messages: ChatMessage[] = [
-        {
-          role: "system",
-          content: `Generate a ${genre} song at ${tempo} BPM based on the following prompt/lyrics.
-Respond with the audio output.`,
-        },
-        { role: "user", content: trackPrompt },
-      ];
-      await chatCompletion({
-        messages,
-        model: audioModel.defaultModel,
-        modalities: ["text", "audio"],
-      });
+      const wavPath = await chatAudioGenerate(trackPrompt, audioModel.defaultModel);
+
       const trackId = generateId();
       const newTrack: Track = {
         id: trackId,
         name: `Track ${tracks.length + 1} — ${genre}`,
         genre,
+        wavPath,
       };
       setTracks((prev) => [...prev, newTrack]);
 
@@ -106,8 +98,8 @@ Respond with the audio output.`,
         endpoint: "/v1/chat/completions",
         requestJson: JSON.stringify({ prompt: trackPrompt, genre, tempo, model: audioModel.defaultModel }),
         status: "completed",
-        mediaPath: null,
-        mediaType: "audio/mp3",
+        mediaPath: wavPath,
+        mediaType: "audio/wav",
         parentId: null,
         costRub: null,
         generationId: null,
@@ -257,6 +249,15 @@ Respond with the audio output.`,
                   </button>
                 ))}
               </div>
+              {currentTrack?.wavPath && (
+                <div className="mt-3">
+                  <audio
+                    controls
+                    className="w-full"
+                    src={convertFileSrc(currentTrack.wavPath)}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

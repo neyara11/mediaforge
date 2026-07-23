@@ -173,3 +173,37 @@ pub async fn api_post_binary(
 
     resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
 }
+
+pub async fn api_post_stream(
+    state: &ApiState,
+    path: &str,
+    body_json: &str,
+) -> Result<String, String> {
+    let url = format!("{}{}", state.base_url, path);
+    let api_key = {
+        state
+            .api_key
+            .read()
+            .map_err(|e| e.to_string())?
+            .clone()
+            .ok_or_else(|| "API key not set".to_string())?
+    };
+    let client = create_client();
+
+    let resp = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .body(body_json.to_string())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let status = resp.status().as_u16();
+    if !resp.status().is_success() {
+        let err_body = resp.text().await.unwrap_or_default();
+        return Err(format!("API error {}: {}", status, err_body));
+    }
+
+    resp.text().await.map_err(|e| e.to_string())
+}

@@ -59,6 +59,7 @@ pub fn run() {
             commands::videos::poll_video,
             commands::videos::download_video,
             commands::chat::chat_completion,
+            commands::chat::chat_audio_generate,
             commands::models::fetch_models,
             commands::models::get_model_info,
             commands::auth::check_auth,

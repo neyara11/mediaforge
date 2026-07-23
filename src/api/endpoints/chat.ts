@@ -8,3 +8,7 @@ export async function chatCompletion(params: ChatCompletionParams): Promise<stri
     modalities: params.modalities ?? null,
   });
 }
+
+export async function chatAudioGenerate(prompt: string, model: string): Promise<string> {
+  return apiInvoke("chat_audio_generate", { prompt, model });
+}

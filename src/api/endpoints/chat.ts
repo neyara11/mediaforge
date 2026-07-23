@@ -1,5 +1,5 @@
 import { apiInvoke } from "../client";
-import type { ChatCompletionParams } from "../types";
+import type { ChatCompletionParams, AudioGenerationResult } from "../types";
 
 export async function chatCompletion(params: ChatCompletionParams): Promise<string> {
   return apiInvoke("chat_completion", {
@@ -9,6 +9,15 @@ export async function chatCompletion(params: ChatCompletionParams): Promise<stri
   });
 }
 
-export async function chatAudioGenerate(prompt: string, model: string): Promise<string> {
-  return apiInvoke("chat_audio_generate", { prompt, model });
+export async function chatAudioGenerate(
+  prompt: string,
+  model: string
+): Promise<AudioGenerationResult> {
+  const raw = await apiInvoke<string>("chat_audio_generate", { prompt, model });
+  const parsed = JSON.parse(raw);
+  return {
+    lyrics: parsed.lyrics || "",
+    audio_base64: parsed.audio_base64 || "",
+    audio_format: parsed.audio_format || "mp3",
+  };
 }

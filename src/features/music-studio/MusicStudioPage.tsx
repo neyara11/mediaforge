@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Music, Play, Pause, Sparkles } from "lucide-react";
+import { Music, Play, Pause, Sparkles, Volume2, Download } from "lucide-react";
 import { chatCompletion, chatAudioGenerate } from "../../api/endpoints/chat";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
@@ -13,6 +13,23 @@ interface Track {
   name: string;
   genre: string;
   lyrics: string;
+  audioUrl: string | null;
+}
+
+function base64ToBlob(base64: string, mimeType: string): Blob {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mimeType });
+}
+
+function formatTime(seconds: number): string {
+  if (!isFinite(seconds) || seconds < 0) return "0:00";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 export default function MusicStudioPage() {
@@ -26,11 +43,99 @@ export default function MusicStudioPage() {
   const [lyrics, setLyrics] = useState("");
   const [showPromptBuilder, setShowPromptBuilder] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
 
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const currentTrackRef = useRef<Track | null>(null);
+  const isPlayingRef = useRef(false);
+  const audioUrlsRef = useRef<Set<string>>(new Set());
   const audioModel = useDefaultModel("audio");
   const textModel = useDefaultModel("text");
 
   const isRu = i18n.language === "ru";
+
+  // Sync refs with state to avoid stale closures in event handlers
+  useEffect(() => { currentTrackRef.current = currentTrack; }, [currentTrack]);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+
+  // Initialize audio element once, with all event listeners
+  useEffect(() => {
+    const audio = new Audio();
+    audio.preload = "auto";
+    audioRef.current = audio;
+
+    const onTimeUpdate = () => setCurrentTime(audio.currentTime);
+    const onLoadedMetadata = () => setDuration(audio.duration);
+    const onEnded = () => { setIsPlaying(false); };
+    const onPlay = () => { setIsPlaying(true); };
+    const onPause = () => { setIsPlaying(false); };
+
+    audio.addEventListener("timeupdate", onTimeUpdate);
+    audio.addEventListener("loadedmetadata", onLoadedMetadata);
+    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
+
+    return () => {
+      audio.removeEventListener("timeupdate", onTimeUpdate);
+      audio.removeEventListener("loadedmetadata", onLoadedMetadata);
+      audio.removeEventListener("ended", onEnded);
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
+      audio.pause();
+      audio.src = "";
+      // Revoke ALL object URLs only on unmount
+      for (const url of audioUrlsRef.current) {
+        URL.revokeObjectURL(url);
+      }
+      audioUrlsRef.current.clear();
+    };
+  }, []);
+
+  const playTrack = useCallback((track: Track) => {
+    const audio = audioRef.current;
+    if (!audio || !track.audioUrl) return;
+
+    // Use refs to avoid stale closure issues
+    if (currentTrackRef.current?.id === track.id && isPlayingRef.current) {
+      audio.pause();
+    } else {
+      audio.src = track.audioUrl;
+      audio.play().catch(console.error);
+    }
+  }, []);
+
+  const selectTrack = useCallback((track: Track) => {
+    // Update ref immediately so playTrack sees the right track
+    currentTrackRef.current = track;
+    setCurrentTrack(track);
+    setLyrics(track.lyrics);
+    setCurrentTime(0);
+    if (track.audioUrl) {
+      playTrack(track);
+    }
+  }, [playTrack]);
+
+  const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const time = Number(e.target.value);
+    setCurrentTime(time);
+    if (audioRef.current) {
+      audioRef.current.currentTime = time;
+    }
+  }, []);
+
+  const handleDownload = useCallback(() => {
+    const track = currentTrackRef.current;
+    if (!track?.audioUrl) return;
+    const a = document.createElement("a");
+    a.href = track.audioUrl;
+    a.download = `${track.name.replace(/[^a-zA-Zа-яА-Я0-9 _-]/g, "")}.mp3`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }, []);
 
   const handleTextModelChange = (newModel: string) => {
     textModel.setDefaultModel(newModel);
@@ -79,18 +184,36 @@ Genre: ${genre}, Tempo: ${tempo}`,
     setError(null);
     try {
       const trackPrompt = lyrics || prompt;
-      const songLyrics = await chatAudioGenerate(trackPrompt, audioModel.defaultModel);
+      const result = await chatAudioGenerate(trackPrompt, audioModel.defaultModel);
+
+      let audioUrl: string | null = null;
+      if (result.audio_base64) {
+        const mimeType = result.audio_format === "wav" ? "audio/wav" : "audio/mpeg";
+        const blob = base64ToBlob(result.audio_base64, mimeType);
+        audioUrl = URL.createObjectURL(blob);
+        audioUrlsRef.current.add(audioUrl);
+      }
 
       const trackId = generateId();
       const newTrack: Track = {
         id: trackId,
         name: `Track ${tracks.length + 1} — ${genre}`,
         genre,
-        lyrics: songLyrics,
+        lyrics: result.lyrics,
+        audioUrl,
       };
       setTracks((prev) => [...prev, newTrack]);
+      currentTrackRef.current = newTrack;
       setCurrentTrack(newTrack);
-      setLyrics(songLyrics);
+      setLyrics(result.lyrics);
+      setCurrentTime(0);
+      setDuration(0);
+
+      // Auto-play the generated track
+      if (audioUrl && audioRef.current) {
+        audioRef.current.src = audioUrl;
+        audioRef.current.play().catch(console.error);
+      }
 
       await saveGeneration({
         id: trackId,
@@ -99,8 +222,8 @@ Genre: ${genre}, Tempo: ${tempo}`,
         endpoint: "/v1/chat/completions",
         requestJson: JSON.stringify({ prompt: trackPrompt, genre, tempo, model: audioModel.defaultModel }),
         status: "completed",
-        mediaPath: null,
-        mediaType: "text/lyrics",
+        mediaPath: audioUrl,
+        mediaType: result.audio_base64 ? `audio/${result.audio_format}` : "text/lyrics",
         parentId: null,
         costRub: null,
         generationId: null,
@@ -111,6 +234,8 @@ Genre: ${genre}, Tempo: ${tempo}`,
     }
     setLoading(false);
   };
+
+  const hasAudio = currentTrack?.audioUrl != null;
 
   return (
     <div className="flex h-full">
@@ -201,54 +326,115 @@ Genre: ${genre}, Tempo: ${tempo}`,
         )}
 
         <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1 overflow-auto p-4">
-            {lyrics && (
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-                <h3 className="mb-3 text-sm font-medium text-zinc-400">
-                  {isRu ? "Текст песни" : "Lyrics"}
-                </h3>
-                <pre className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-300">
-                  {lyrics}
-                </pre>
-              </div>
-            )}
-            {!lyrics && (
-              <div className="flex h-full items-center justify-center text-zinc-600">
-                <div className="text-center">
-                  <Music className="mx-auto mb-3 h-8 w-8 opacity-50" />
-                  <p className="text-sm">
-                    {isRu
-                      ? "Опишите песню и нажмите «Текст песни» или «Создать музыку»"
-                      : "Describe a song and click Lyrics or Generate Music"}
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {tracks.length > 0 && (
-            <div className="w-64 border-l border-zinc-800 p-4">
-              <h3 className="mb-3 text-sm font-medium text-zinc-400">Playlist</h3>
-              <div className="space-y-2">
-                {tracks.map((track) => (
+          <div className="flex flex-1 flex-col overflow-hidden">
+            {/* Audio player bar */}
+            {hasAudio && (
+              <div className="border-b border-zinc-800 bg-zinc-900/50 px-4 py-3">
+                <div className="flex items-center gap-3">
                   <button
-                    key={track.id}
-                    onClick={() => setCurrentTrack(track)}
-                    className={cn(
-                      "flex w-full items-center gap-3 rounded-lg p-2 text-left text-sm transition-colors",
-                      currentTrack?.id === track.id
-                        ? "bg-zinc-800 text-white"
-                        : "text-zinc-400 hover:bg-zinc-800/50",
-                    )}
+                    onClick={() => currentTrack && playTrack(currentTrack)}
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-600 text-white transition-colors hover:bg-violet-500"
                   >
-                    {currentTrack?.id === track.id ? (
+                    {isPlaying ? (
                       <Pause className="h-4 w-4" />
                     ) : (
                       <Play className="h-4 w-4" />
                     )}
-                    {track.name}
                   </button>
-                ))}
+
+                  <span className="text-xs tabular-nums text-zinc-400 w-10 text-right">
+                    {formatTime(currentTime)}
+                  </span>
+
+                  <input
+                    type="range"
+                    min={0}
+                    max={duration || 0}
+                    value={currentTime}
+                    onChange={handleSeek}
+                    className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700 accent-violet-500 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-violet-400"
+                  />
+
+                  <span className="text-xs tabular-nums text-zinc-500 w-10">
+                    {formatTime(duration)}
+                  </span>
+
+                  <button
+                    onClick={handleDownload}
+                    className="rounded p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
+                    title={isRu ? "Скачать MP3" : "Download MP3"}
+                  >
+                    <Download className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Lyrics area */}
+            <div className="flex-1 overflow-auto p-4">
+              {lyrics ? (
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+                  <h3 className="mb-3 text-sm font-medium text-zinc-400">
+                    {isRu ? "Текст песни" : "Lyrics"}
+                  </h3>
+                  <pre className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-300">
+                    {lyrics}
+                  </pre>
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center text-zinc-600">
+                  <div className="text-center">
+                    <Music className="mx-auto mb-3 h-8 w-8 opacity-50" />
+                    <p className="text-sm">
+                      {isRu
+                        ? "Опишите песню и нажмите «Текст песни» или «Создать музыку»"
+                        : "Describe a song and click Lyrics or Generate Music"}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {tracks.length > 0 && (
+            <div className="w-64 border-l border-zinc-800 p-4">
+              <h3 className="mb-3 text-sm font-medium text-zinc-400">
+                {isRu ? "Плейлист" : "Playlist"}
+              </h3>
+              <div className="space-y-2">
+                {tracks.map((track) => {
+                  const isCurrent = currentTrack?.id === track.id;
+                  return (
+                    <button
+                      key={track.id}
+                      onClick={() => selectTrack(track)}
+                      className={cn(
+                        "flex w-full items-center gap-3 rounded-lg p-2 text-left text-sm transition-colors",
+                        isCurrent
+                          ? "bg-zinc-800 text-white"
+                          : "text-zinc-400 hover:bg-zinc-800/50",
+                      )}
+                    >
+                      {isCurrent && isPlaying ? (
+                        <Volume2 className="h-4 w-4 shrink-0 text-violet-400" />
+                      ) : isCurrent ? (
+                        <Music className="h-4 w-4 shrink-0 text-violet-400" />
+                      ) : track.audioUrl ? (
+                        <Play className="h-4 w-4 shrink-0" />
+                      ) : (
+                        <Music className="h-4 w-4 shrink-0 opacity-40" />
+                      )}
+                      <div className="flex min-w-0 flex-col items-start">
+                        <span className="truncate">{track.name}</span>
+                        {!track.audioUrl && (
+                          <span className="text-[10px] text-zinc-600">
+                            {isRu ? "только текст" : "text only"}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}

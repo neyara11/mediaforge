@@ -44,3 +44,9 @@ export interface ChatContentPart {
   image_url?: { url: string };
   input_audio?: { data: string; format: string };
 }
+
+export interface AudioGenerationResult {
+  lyrics: string;
+  audio_base64: string;
+  audio_format: "mp3" | "wav";
+}

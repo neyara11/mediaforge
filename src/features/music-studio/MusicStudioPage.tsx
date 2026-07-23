@@ -14,6 +14,8 @@ interface Track {
   genre: string;
   lyrics: string;
   audioUrl: string | null;
+  audioBase64: string;
+  audioFormat: string;
 }
 
 function base64ToBlob(base64: string, mimeType: string): Blob {
@@ -128,13 +130,17 @@ export default function MusicStudioPage() {
 
   const handleDownload = useCallback(() => {
     const track = currentTrackRef.current;
-    if (!track?.audioUrl) return;
+    if (!track?.audioBase64) return;
+    const mime = track.audioFormat === "wav" ? "audio/wav" : "audio/mpeg";
+    const ext = track.audioFormat === "wav" ? "wav" : "mp3";
+    const dataUri = `data:${mime};base64,${track.audioBase64}`;
     const a = document.createElement("a");
-    a.href = track.audioUrl;
-    a.download = `${track.name.replace(/[^a-zA-Zа-яА-Я0-9 _-]/g, "")}.mp3`;
+    a.href = dataUri;
+    a.download = `${track.name.replace(/[^a-zA-Zа-яА-Я0-9 _-]/g, "")}.${ext}`;
+    a.style.display = "none";
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
+    setTimeout(() => document.body.removeChild(a), 100);
   }, []);
 
   const handleTextModelChange = (newModel: string) => {
@@ -201,6 +207,8 @@ Genre: ${genre}, Tempo: ${tempo}`,
         genre,
         lyrics: result.lyrics,
         audioUrl,
+        audioBase64: result.audio_base64,
+        audioFormat: result.audio_format,
       };
       setTracks((prev) => [...prev, newTrack]);
       currentTrackRef.current = newTrack;

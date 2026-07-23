@@ -15,7 +15,7 @@ interface ImageResult {
 export default function ImageStudioPage() {
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState("1024x1024");
-  const [quality, setQuality] = useState("standard");
+  const [quality, setQuality] = useState("auto");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<ImageResult[]>([]);
   const [selected, setSelected] = useState<ImageResult | null>(null);
@@ -128,8 +128,10 @@ export default function ImageStudioPage() {
               onChange={(e) => setQuality(e.target.value)}
               className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-white outline-none"
             >
-              <option value="standard">Standard</option>
-              <option value="hd">HD</option>
+              <option value="auto">Auto</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
             </select>
             <button
               onClick={handleGenerate}

@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Music, Play, Pause, Sparkles, Volume2, Download } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import { chatCompletion, chatAudioGenerate } from "../../api/endpoints/chat";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
@@ -128,19 +130,30 @@ export default function MusicStudioPage() {
     }
   }, []);
 
-  const handleDownload = useCallback(() => {
+  const handleDownload = useCallback(async () => {
     const track = currentTrackRef.current;
     if (!track?.audioBase64) return;
-    const mime = track.audioFormat === "wav" ? "audio/wav" : "audio/mpeg";
+
     const ext = track.audioFormat === "wav" ? "wav" : "mp3";
-    const dataUri = `data:${mime};base64,${track.audioBase64}`;
-    const a = document.createElement("a");
-    a.href = dataUri;
-    a.download = `${track.name.replace(/[^a-zA-Zа-яА-Я0-9 _-]/g, "")}.${ext}`;
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => document.body.removeChild(a), 100);
+    const defaultName = `${track.name.replace(/[^a-zA-Zа-яА-Я0-9 _-]/g, "")}.${ext}`;
+
+    try {
+      const filePath = await save({
+        defaultPath: defaultName,
+        filters: [{
+          name: ext === "wav" ? "WAV Audio" : "MP3 Audio",
+          extensions: [ext],
+        }],
+      });
+      if (filePath) {
+        await invoke("save_base64_file", {
+          base64Data: track.audioBase64,
+          filePath,
+        });
+      }
+    } catch (e) {
+      console.error("Download failed:", e);
+    }
   }, []);
 
   const handleTextModelChange = (newModel: string) => {

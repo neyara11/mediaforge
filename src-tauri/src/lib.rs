@@ -14,6 +14,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(ApiState::new())
         .setup(|app| {
             let handle = app.handle().clone();
@@ -67,6 +68,7 @@ pub fn run() {
             commands::auth::test_connection,
             commands::auth::get_balance,
             commands::storage::save_media,
+            commands::storage::save_base64_file,
             commands::storage::load_media,
             commands::storage::list_generations,
             commands::db_commands::create_project,

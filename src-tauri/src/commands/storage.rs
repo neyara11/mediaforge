@@ -4,6 +4,21 @@ use tauri::AppHandle;
 use crate::api::client::ApiState;
 
 #[tauri::command]
+pub async fn save_base64_file(
+    _app: AppHandle,
+    _state: tauri::State<'_, ApiState>,
+    base64_data: String,
+    file_path: String,
+) -> Result<String, String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&base64_data)
+        .map_err(|e| format!("Base64 decode error: {}", e))?;
+    std::fs::write(&file_path, &bytes).map_err(|e| format!("Write error: {}", e))?;
+    Ok(file_path)
+}
+
+#[tauri::command]
 pub async fn save_media(
     app: AppHandle,
     _state: tauri::State<'_, ApiState>,

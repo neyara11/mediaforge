@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ArrowRight, CheckCircle, XCircle, Key, Box, Monitor, Zap } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { fetchModels } from "../../api/endpoints/models";
+import { setSetting } from "../../db";
 
 type Step = "welcome" | "apiKey" | "models" | "system" | "ready";
 
@@ -20,6 +21,7 @@ export default function OnboardingPage() {
     error?: string;
   } | null>(null);
   const [modelsLoaded, setModelsLoaded] = useState(0);
+  const [ffmpegPath, setFfmpegPath] = useState("");
 
   const stepIndex = STEPS.indexOf(step);
 
@@ -196,7 +198,7 @@ export default function OnboardingPage() {
                 <h2 className="text-lg font-semibold">{t("ffmpegStep")}</h2>
               </div>
               <p className="mb-4 text-sm text-zinc-400">{t("ffmpegDesc")}</p>
-              <div className="mb-6 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+              <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
                 <div className="flex items-start gap-2 text-sm text-amber-400">
                   <Zap className="mt-0.5 h-4 w-4 shrink-0" />
                   <div>
@@ -211,12 +213,20 @@ export default function OnboardingPage() {
                       >
                         gyan.dev
                       </a>
-                      , распакуйте и добавьте папку <code className="rounded bg-zinc-800 px-1 text-zinc-300">bin</code> в
-                      системный PATH.
+                      , распакуйте и укажите путь:
                     </p>
                   </div>
                 </div>
               </div>
+              <input
+                value={ffmpegPath}
+                onChange={(e) => {
+                  setFfmpegPath(e.target.value);
+                  setSetting("ffmpeg_path", e.target.value).catch(() => {});
+                }}
+                placeholder="C:\ffmpeg\bin\ffmpeg.exe"
+                className="mb-4 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm text-white placeholder-zinc-500 outline-none focus:border-violet-500"
+              />
               <button
                 onClick={goNext}
                 className="flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-500"

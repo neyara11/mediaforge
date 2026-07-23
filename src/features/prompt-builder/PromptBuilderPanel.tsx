@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Sparkles, Wand2, ChevronDown, ChevronUp, Copy, Check } from "lucide-react";
 import { chatCompletion } from "../../api/endpoints/chat";
+import { useDefaultModel } from "../../shared/useDefaultModel";
 import type { ChatMessage } from "../../api/types";
 
 interface PromptBuilderProps {
@@ -31,6 +32,7 @@ Return ONLY the lyrics with structure tags, no explanations or markdown.`,
 };
 
 export default function PromptBuilder({ mode, onUsePrompt }: PromptBuilderProps) {
+  const { defaultModel } = useDefaultModel("text");
   const [input, setInput] = useState("");
   const [generated, setGenerated] = useState("");
   const [loading, setLoading] = useState(false);
@@ -47,7 +49,7 @@ export default function PromptBuilder({ mode, onUsePrompt }: PromptBuilderProps)
       ];
       const result = await chatCompletion({
         messages,
-        model: "openai/gpt-4o",
+        model: defaultModel,
         modalities: ["text"],
       });
       const parsed = JSON.parse(result);

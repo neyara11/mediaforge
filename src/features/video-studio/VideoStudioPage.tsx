@@ -66,6 +66,7 @@ export default function VideoStudioPage() {
       try {
         const gens = await getGenerations();
         const videoGens = gens.filter((g) => g.endpoint === "/v1/videos" && g.generationId);
+        console.log(`Loaded ${videoGens.length} video generations from DB`);
 
         if (videoGens.length === 0) return;
 
@@ -136,7 +137,7 @@ export default function VideoStudioPage() {
           parentId: null,
           costRub: task.cost,
           generationId: remoteId,
-        }).catch(() => {});
+        }).catch((e) => { console.error("saveGeneration failed:", e); });
       }
     } catch (e) {
       setError(String(e));
@@ -182,7 +183,7 @@ export default function VideoStudioPage() {
           parentId: null,
           costRub: data.cost,
           generationId: current.remoteId,
-        }).catch(() => {});
+        }).catch((e) => { console.error("saveGeneration failed:", e); });
       }
 
       if (data.status === "completed") {
@@ -228,7 +229,7 @@ export default function VideoStudioPage() {
           parentId: null,
           costRub: data.cost ?? current.cost,
           generationId: current.remoteId,
-        }).catch(() => {});
+        }).catch((e) => { console.error("saveGeneration failed:", e); });
         return;
       }
 
@@ -324,7 +325,7 @@ export default function VideoStudioPage() {
         parentId: null,
         costRub: null,
         generationId: remoteId,
-      }).catch(() => {});
+      }).catch((e) => { console.error("saveGeneration failed:", e); });
     } catch (e) {
       setError(String(e));
       setTasks((prev) =>

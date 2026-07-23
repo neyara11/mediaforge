@@ -110,6 +110,7 @@ export default function SpeechLabPage() {
   const reloadHistory = useCallback(async () => {
     try {
       const gens = await getGenerations();
+      console.log(`Loaded ${gens.length} speech generations from DB`);
       setTtsHistory(gens.filter((g) => g.endpoint === "/v1/audio/speech"));
       setSttHistory(gens.filter((g) => g.endpoint === "/v1/audio/transcriptions"));
     } catch {
@@ -122,6 +123,7 @@ export default function SpeechLabPage() {
     getGenerations()
       .then((gens) => {
         if (cancelled) return;
+        console.log(`Loaded ${gens.length} speech generations from DB`);
         setTtsHistory(gens.filter((g) => g.endpoint === "/v1/audio/speech"));
         setSttHistory(gens.filter((g) => g.endpoint === "/v1/audio/transcriptions"));
         setHistoryLoaded(true);
@@ -164,9 +166,27 @@ export default function SpeechLabPage() {
       setAudioUrl(url);
 
       const genId = generateId();
-      await saveGeneration({
+      try {
+        await saveGeneration({
+          id: genId,
+          projectId: null,
+          model: ttsModel.defaultModel,
+          endpoint: "/v1/audio/speech",
+          requestJson: JSON.stringify({ text: ttsText, model: ttsModel.defaultModel, voice: effectiveVoice }),
+          responseJson: JSON.stringify({ type: "tts", text: ttsText }),
+          status: "completed",
+          mediaPath: null,
+          mediaType: "audio/mp3",
+          parentId: null,
+          costRub: null,
+          generationId: null,
+        });
+      } catch (e) {
+        console.error("saveGeneration failed:", e);
+      }
+      const newTtsEntry: Generation = {
         id: genId,
-        projectId: null,
+        projectId: "",
         model: ttsModel.defaultModel,
         endpoint: "/v1/audio/speech",
         requestJson: JSON.stringify({ text: ttsText, model: ttsModel.defaultModel, voice: effectiveVoice }),
@@ -174,10 +194,14 @@ export default function SpeechLabPage() {
         status: "completed",
         mediaPath: null,
         mediaType: "audio/mp3",
+        thumbnailPath: null,
         parentId: null,
         costRub: null,
         generationId: null,
-      });
+        createdAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+      };
+      setTtsHistory((prev) => [newTtsEntry, ...prev]);
       await reloadHistory();
     } catch (e) {
       setError(String(e));
@@ -236,9 +260,31 @@ export default function SpeechLabPage() {
       setSttDuration(parsed.duration ?? null);
 
       const genId = generateId();
-      await saveGeneration({
+      try {
+        await saveGeneration({
+          id: genId,
+          projectId: null,
+          model: sttModel.defaultModel,
+          endpoint: "/v1/audio/transcriptions",
+          requestJson: JSON.stringify({
+            filePath: sttFilePath,
+            model: sttModel.defaultModel,
+            language: sttLanguage || null,
+          }),
+          responseJson: JSON.stringify({ text: parsed.text, duration: parsed.duration }),
+          status: "completed",
+          mediaPath: sttFilePath,
+          mediaType: `audio/${extFromPath(sttFilePath)}`,
+          parentId: null,
+          costRub: parsed.duration ? Math.ceil(parsed.duration / 60) * 6 : null,
+          generationId: null,
+        });
+      } catch (e) {
+        console.error("saveGeneration failed:", e);
+      }
+      const newSttEntry: Generation = {
         id: genId,
-        projectId: null,
+        projectId: "",
         model: sttModel.defaultModel,
         endpoint: "/v1/audio/transcriptions",
         requestJson: JSON.stringify({
@@ -250,10 +296,14 @@ export default function SpeechLabPage() {
         status: "completed",
         mediaPath: sttFilePath,
         mediaType: `audio/${extFromPath(sttFilePath)}`,
+        thumbnailPath: null,
         parentId: null,
         costRub: parsed.duration ? Math.ceil(parsed.duration / 60) * 6 : null,
         generationId: null,
-      });
+        createdAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+      };
+      setSttHistory((prev) => [newSttEntry, ...prev]);
       await reloadHistory();
     } catch (e) {
       setError(String(e));

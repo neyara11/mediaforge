@@ -56,7 +56,6 @@ export default function MusicStudioPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [loadedFromDb, setLoadedFromDb] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentTrackRef = useRef<Track | null>(null);
@@ -103,7 +102,6 @@ export default function MusicStudioPage() {
   }, []);
 
   useEffect(() => {
-    if (loadedFromDb) return;
     let cancelled = false;
 
     (async () => {
@@ -117,6 +115,7 @@ export default function MusicStudioPage() {
             (g.mediaType?.startsWith("audio/") || g.mediaType === "text/lyrics") &&
             g.status === "completed"
         );
+        console.log(`Loaded ${musicGenerations.length} music generations from DB`);
 
         const loadedTracks: Track[] = [];
 
@@ -173,18 +172,16 @@ export default function MusicStudioPage() {
             name: `Track ${i + 1} — ${t.genre}`,
           }));
           setTracks(renamed);
-          setLoadedFromDb(true);
         }
       } catch (e) {
         if (!cancelled) {
-          setLoadedFromDb(true);
           console.error("Failed to load tracks from DB:", e);
         }
       }
     })();
 
     return () => { cancelled = true; };
-  }, [loadedFromDb]);
+    }, []);
 
   const playTrack = useCallback((track: Track) => {
     const audio = audioRef.current;
@@ -327,20 +324,24 @@ Genre: ${genre}, Tempo: ${tempo}`,
         audio_format: result.audio_format,
       });
 
-      await saveGeneration({
-        id: trackId,
-        projectId: null,
-        model: audioModel.defaultModel,
-        endpoint: "/v1/chat/completions",
-        requestJson: JSON.stringify({ prompt: trackPrompt, genre, tempo, model: audioModel.defaultModel }),
-        responseJson,
-        status: "completed",
-        mediaPath: audioUrl,
-        mediaType: result.audio_base64 ? `audio/${result.audio_format}` : "text/lyrics",
-        parentId: null,
-        costRub: result.cost,
-        generationId: null,
-      });
+      try {
+        await saveGeneration({
+          id: trackId,
+          projectId: null,
+          model: audioModel.defaultModel,
+          endpoint: "/v1/chat/completions",
+          requestJson: JSON.stringify({ prompt: trackPrompt, genre, tempo, model: audioModel.defaultModel }),
+          responseJson,
+          status: "completed",
+          mediaPath: audioUrl,
+          mediaType: result.audio_base64 ? `audio/${result.audio_format}` : "text/lyrics",
+          parentId: null,
+          costRub: result.cost,
+          generationId: null,
+        });
+      } catch (e) {
+        console.error("saveGeneration failed:", e);
+      }
     } catch (e) {
       setError(String(e));
       console.error("Music generation failed:", e);

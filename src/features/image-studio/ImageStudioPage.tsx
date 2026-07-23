@@ -93,6 +93,7 @@ export default function ImageStudioPage() {
           }
         }
         setHistoryImages(images);
+        console.log(`Loaded ${images.length} image generations from DB`);
       } catch (e) {
         console.error("Failed to load image history:", e);
       }
@@ -156,22 +157,27 @@ export default function ImageStudioPage() {
       );
       setResults(images);
       setSelected(images[0] ?? null);
+      setHistoryImages((prev) => [...images, ...prev]);
 
       const genId = generateId();
-      await saveGeneration({
-        id: genId,
-        projectId: null,
-        model: defaultModel,
-        endpoint: "/v1/images",
-        requestJson: JSON.stringify({ prompt, model: defaultModel, size, quality }),
-        responseJson: result,
-        status: "completed",
-        mediaPath: null,
-        mediaType: "image/png",
-        parentId: null,
-        costRub: parsed?.usage?.cost ?? null,
-        generationId: parsed?.generation_id ?? null,
-      });
+      try {
+        await saveGeneration({
+          id: genId,
+          projectId: null,
+          model: defaultModel,
+          endpoint: "/v1/images",
+          requestJson: JSON.stringify({ prompt, model: defaultModel, size, quality }),
+          responseJson: result,
+          status: "completed",
+          mediaPath: null,
+          mediaType: "image/png",
+          parentId: null,
+          costRub: parsed?.usage?.cost ?? null,
+          generationId: parsed?.generation_id ?? null,
+        });
+      } catch (e) {
+        console.error("saveGeneration failed:", e);
+      }
     } catch (e) {
       setError(String(e));
       console.error("Generation failed:", e);

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthContext";
 import ModelCatalog from "./ModelCatalog";
+import ErrorBoundary from "../../components/ErrorBoundary";
 
 type Tab = "general" | "models";
 
@@ -74,7 +75,11 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {tab === "models" && <ModelCatalog />}
+      {tab === "models" && (
+        <ErrorBoundary>
+          <ModelCatalog />
+        </ErrorBoundary>
+      )}
     </div>
   );
 }

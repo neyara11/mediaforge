@@ -26,6 +26,15 @@ type SortField = "price" | "name";
 type SortDir = "asc" | "desc";
 type ModalityFilter = "all" | "image" | "tts" | "stt" | "video" | "audio" | "text";
 
+function safeJsonParse<T>(v: unknown, fallback: T): T {
+  if (typeof v !== "string") return (v as T) ?? fallback;
+  try {
+    return JSON.parse(v) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 function getModality(model: RouterAIModel): ModalityFilter {
   const outputs = model.output_modalities ?? [];
   if (outputs.includes("image")) return "image";
@@ -57,20 +66,30 @@ export default function ModelCatalog() {
     try {
       const result = await fetchModels();
       const parsed = JSON.parse(result);
-      const data = parsed?.data ?? [];
+      const data = (parsed?.data ?? []).slice(0, 200);
       setModels(data);
-      await saveModelsCache(JSON.stringify(data));
+      saveModelsCache(JSON.stringify(data)).catch(() => {});
     } catch {
       try {
         const cached = await getModelsCache();
         if (cached && cached.length > 0) {
-          setModels(cached as RouterAIModel[]);
+          const parsed = (cached as unknown[]).map((m: unknown) => {
+            const r = m as Record<string, unknown>;
+            return {
+              id: String(r.id ?? ""),
+              name: r.name,
+              provider: r.provider,
+              output_modalities: safeJsonParse(r.output_modalities, []),
+              supported_params: safeJsonParse(r.supported_params, []),
+              pricing: safeJsonParse(r.pricing_json, null),
+            };
+          });
+          setModels(parsed as unknown as RouterAIModel[]);
         }
       } catch {
         // No cached models available
       }
     }
-    setLoading(false);
     setLoading(false);
   };
 

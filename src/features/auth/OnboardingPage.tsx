@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, CheckCircle, XCircle, Key, Box, Monitor, Zap } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
+import { fetchModels } from "../../api/endpoints/models";
 
 type Step = "welcome" | "apiKey" | "models" | "system" | "ready";
 
@@ -32,11 +33,10 @@ export default function OnboardingPage() {
 
   const handleModelsLoad = async () => {
     try {
-      const { testConnection: testConn } = await import("../../api/endpoints/auth");
-      const result = await testConn();
+      const result = await fetchModels();
       const parsed = JSON.parse(result);
-      const count = parsed?.data?.length ?? 0;
-      setModelsLoaded(count);
+      const models = parsed?.data ?? [];
+      setModelsLoaded(models.length);
     } catch {
       setModelsLoaded(0);
     }
@@ -197,9 +197,24 @@ export default function OnboardingPage() {
               </div>
               <p className="mb-4 text-sm text-zinc-400">{t("ffmpegDesc")}</p>
               <div className="mb-6 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-                <div className="flex items-center gap-2 text-sm text-amber-400">
-                  <Zap className="h-4 w-4" />
-                  {t("ffmpegNotFound")}
+                <div className="flex items-start gap-2 text-sm text-amber-400">
+                  <Zap className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div>
+                    <p className="mb-2">{t("ffmpegNotFound")}</p>
+                    <p className="text-xs text-zinc-500">
+                      Скачайте ffmpeg с{" "}
+                      <a
+                        href="https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-violet-400 underline"
+                      >
+                        gyan.dev
+                      </a>
+                      , распакуйте и добавьте папку <code className="rounded bg-zinc-800 px-1 text-zinc-300">bin</code> в
+                      системный PATH.
+                    </p>
+                  </div>
                 </div>
               </div>
               <button

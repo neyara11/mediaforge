@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Video, Clock, AlertCircle } from "lucide-react";
+import { Video, Clock, AlertCircle, Download } from "lucide-react";
 import { createVideo, pollVideo, downloadVideo } from "../../api/endpoints/videos";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId, formatCostRub } from "../../shared/utils";
@@ -16,9 +16,21 @@ interface VideoTask {
   videoUrl: string | null;
   cost: number | null;
   error: string | null;
+  createdAt: string | null;
 }
 
 const DURATION_LABELS: Record<number, string> = { 4: "4s", 8: "8s", 12: "12s" };
+
+function formatDate(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 export default function VideoStudioPage() {
   const [prompt, setPrompt] = useState("");
@@ -26,6 +38,7 @@ export default function VideoStudioPage() {
   const [tasks, setTasks] = useState<VideoTask[]>([]);
   const [showPromptBuilder, setShowPromptBuilder] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [completedExpanded, setCompletedExpanded] = useState(true);
 
   const { defaultModel, setDefaultModel, availableModels } = useDefaultModel("video");
 
@@ -52,16 +65,11 @@ export default function VideoStudioPage() {
     const recover = async () => {
       try {
         const gens = await getGenerations();
-        const unfinished = gens.filter(
-          (g) =>
-            g.endpoint === "/v1/videos" &&
-            g.generationId &&
-            (g.status === "pending" || g.status === "processing"),
-        );
+        const videoGens = gens.filter((g) => g.endpoint === "/v1/videos" && g.generationId);
 
-        if (unfinished.length === 0) return;
+        if (videoGens.length === 0) return;
 
-        const recovered: VideoTask[] = unfinished.map((g) => {
+        const recovered: VideoTask[] = videoGens.map((g) => {
           let promptText = "";
           let dur = 8;
           try {
@@ -77,10 +85,11 @@ export default function VideoStudioPage() {
             prompt: promptText,
             model: g.model,
             duration: dur,
-            status: g.status as "pending" | "processing",
+            status: g.status as VideoTask["status"],
             videoUrl: null,
             cost: g.costRub,
             error: null,
+            createdAt: g.createdAt,
           };
         });
 
@@ -278,6 +287,7 @@ export default function VideoStudioPage() {
       videoUrl: null,
       cost: null,
       error: null,
+      createdAt: null,
     };
     setTasks((prev) => [newTask, ...prev]);
 
@@ -326,6 +336,78 @@ export default function VideoStudioPage() {
       );
     }
   };
+
+  const activeTasks = tasks.filter(
+    (t) => t.status !== "completed",
+  );
+  const completedTasks = tasks.filter(
+    (t) => t.status === "completed",
+  );
+
+  const TaskCard = ({ task }: { task: VideoTask }) => (
+    <div
+      key={task.id}
+      className="rounded-lg border border-zinc-800 bg-zinc-900 p-4"
+    >
+      <div className="flex items-center justify-between">
+        <div className="min-w-0 flex-1">
+          <p className="line-clamp-1 text-sm text-zinc-300">
+            {task.prompt}
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            {task.model}
+            {task.duration && (
+              <span className="ml-2">
+                {DURATION_LABELS[task.duration] ?? `${task.duration}s`}
+              </span>
+            )}
+          </p>
+        </div>
+        <div className="ml-4 flex shrink-0 items-center gap-3">
+          {task.cost != null && (
+            <span className="text-xs text-zinc-500">
+              {formatCostRub(task.cost)}
+            </span>
+          )}
+          <div className="flex items-center gap-2 text-xs text-zinc-500">
+            <Clock className="h-3 w-3" />
+            {task.status === "pending"
+              ? "Queued"
+              : task.status === "processing"
+                ? "Processing..."
+                : task.status === "completed"
+                  ? "Completed"
+                  : "Failed"}
+          </div>
+          <div
+            className={cn(
+              "h-2 w-2 rounded-full",
+              task.status === "completed"
+                ? "bg-emerald-400"
+                : task.status === "failed"
+                  ? "bg-red-400"
+                  : task.status === "processing"
+                    ? "animate-pulse bg-amber-400"
+                    : "bg-zinc-600",
+            )}
+          />
+        </div>
+      </div>
+
+      {task.status === "processing" && (
+        <div className="mt-3 h-1 overflow-hidden rounded-full bg-zinc-800">
+          <div className="animate-progress h-full rounded-full bg-violet-500" />
+        </div>
+      )}
+
+      {task.status === "failed" && task.error && (
+        <div className="mt-3 flex items-start gap-2 rounded-lg bg-red-500/10 p-2 text-xs text-red-400">
+          <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>{task.error}</span>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="flex h-full">
@@ -390,7 +472,7 @@ export default function VideoStudioPage() {
         )}
 
         <div className="flex-1 overflow-auto p-4">
-          {tasks.length === 0 && (
+          {activeTasks.length === 0 && completedTasks.length === 0 && (
             <div className="flex h-64 items-center justify-center text-zinc-600">
               <div className="text-center">
                 <Video className="mx-auto mb-3 h-8 w-8 opacity-50" />
@@ -399,83 +481,88 @@ export default function VideoStudioPage() {
             </div>
           )}
 
-          <div className="space-y-3">
-            {tasks.map((task) => (
-              <div
-                key={task.id}
-                className="rounded-lg border border-zinc-800 bg-zinc-900 p-4"
+          {activeTasks.length > 0 && (
+            <div className="space-y-3">
+              {activeTasks.map((task) => (
+                <TaskCard key={task.id} task={task} />
+              ))}
+            </div>
+          )}
+
+          {completedTasks.length > 0 && (
+            <div className={cn(activeTasks.length > 0 && "mt-6")}>
+              <button
+                onClick={() => setCompletedExpanded((v) => !v)}
+                className="flex w-full items-center gap-2 text-sm font-medium text-zinc-400 transition-colors hover:text-zinc-300"
               >
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0 flex-1">
-                    <p className="line-clamp-1 text-sm text-zinc-300">
-                      {task.prompt}
-                    </p>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      {task.model}
-                      {task.duration && (
-                        <span className="ml-2">
-                          {DURATION_LABELS[task.duration] ?? `${task.duration}s`}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  <div className="ml-4 flex shrink-0 items-center gap-3">
-                    {task.cost != null && (
-                      <span className="text-xs text-zinc-500">
-                        {formatCostRub(task.cost)}
-                      </span>
-                    )}
-                    <div className="flex items-center gap-2 text-xs text-zinc-500">
-                      <Clock className="h-3 w-3" />
-                      {task.status === "pending"
-                        ? "Queued"
-                        : task.status === "processing"
-                          ? "Processing..."
-                          : task.status === "completed"
-                            ? "Completed"
-                            : "Failed"}
-                    </div>
+                <span className={cn("transition-transform", completedExpanded && "rotate-90")}>
+                  &#9654;
+                </span>
+                Completed ({completedTasks.length})
+              </button>
+
+              {completedExpanded && (
+                <div className="mt-3 space-y-3">
+                  {completedTasks.map((task) => (
                     <div
-                      className={cn(
-                        "h-2 w-2 rounded-full",
-                        task.status === "completed"
-                          ? "bg-emerald-400"
-                          : task.status === "failed"
-                            ? "bg-red-400"
-                            : task.status === "processing"
-                              ? "animate-pulse bg-amber-400"
-                              : "bg-zinc-600",
+                      key={task.id}
+                      className="rounded-lg border border-zinc-800/50 bg-zinc-900/50 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1">
+                          <p className="line-clamp-2 text-sm text-zinc-300">
+                            {task.prompt}
+                          </p>
+                          <p className="mt-1 text-xs text-zinc-500">
+                            {task.model}
+                            {task.duration && (
+                              <span className="ml-2">
+                                {DURATION_LABELS[task.duration] ?? `${task.duration}s`}
+                              </span>
+                            )}
+                            {task.createdAt && (
+                              <span className="ml-2 text-zinc-600">
+                                {formatDate(task.createdAt)}
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {task.cost != null && (
+                            <span className="text-xs text-zinc-500">
+                              {formatCostRub(task.cost)}
+                            </span>
+                          )}
+                          {task.videoUrl ? (
+                            <span className="text-xs text-emerald-400">&#10003;</span>
+                          ) : task.remoteId ? (
+                            <button
+                              onClick={() => handleVideoDownload(task.id, task.remoteId!)}
+                              className="flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-violet-500"
+                            >
+                              <Download className="h-3 w-3" />
+                              Re-download
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {task.videoUrl && (
+                        <div className="mt-3">
+                          <video
+                            src={task.videoUrl}
+                            controls
+                            className="w-full rounded-lg"
+                            style={{ maxHeight: 400 }}
+                          />
+                        </div>
                       )}
-                    />
-                  </div>
+                    </div>
+                  ))}
                 </div>
-
-                {task.status === "processing" && (
-                  <div className="mt-3 h-1 overflow-hidden rounded-full bg-zinc-800">
-                    <div className="animate-progress h-full rounded-full bg-violet-500" />
-                  </div>
-                )}
-
-                {task.status === "failed" && task.error && (
-                  <div className="mt-3 flex items-start gap-2 rounded-lg bg-red-500/10 p-2 text-xs text-red-400">
-                    <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
-                    <span>{task.error}</span>
-                  </div>
-                )}
-
-                {task.status === "completed" && task.videoUrl && (
-                  <div className="mt-3">
-                    <video
-                      src={task.videoUrl}
-                      controls
-                      className="w-full rounded-lg"
-                      style={{ maxHeight: 400 }}
-                    />
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

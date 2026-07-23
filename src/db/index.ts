@@ -11,6 +11,7 @@ export async function saveGeneration(params: {
   model: string;
   endpoint: string;
   requestJson: string;
+  responseJson?: string | null;
   status: string;
   mediaPath: string | null;
   mediaType: string | null;
@@ -24,6 +25,7 @@ export async function saveGeneration(params: {
     model: params.model,
     endpoint: params.endpoint,
     requestJson: params.requestJson,
+    responseJson: params.responseJson ?? null,
     status: params.status,
     mediaPath: params.mediaPath,
     mediaType: params.mediaType,

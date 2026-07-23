@@ -67,6 +67,7 @@ pub async fn save_generation(
     model: String,
     endpoint: String,
     request_json: String,
+    response_json: Option<String>,
     status: String,
     media_path: Option<String>,
     media_type: Option<String>,
@@ -75,9 +76,10 @@ pub async fn save_generation(
     generation_id: Option<String>,
 ) -> Result<(), String> {
     sqlx::query(
-        "INSERT INTO generations (id, project_id, model, endpoint, request_json, status, media_path, media_type, parent_id, cost_rub, generation_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO generations (id, project_id, model, endpoint, request_json, response_json, status, media_path, media_type, parent_id, cost_rub, generation_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
+           response_json = excluded.response_json,
            status = excluded.status,
            media_path = excluded.media_path,
            cost_rub = excluded.cost_rub,
@@ -89,6 +91,7 @@ pub async fn save_generation(
         .bind(&model)
         .bind(&endpoint)
         .bind(&request_json)
+        .bind(&response_json)
         .bind(&status)
         .bind(&media_path)
         .bind(&media_type)

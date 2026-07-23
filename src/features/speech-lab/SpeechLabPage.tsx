@@ -1,11 +1,12 @@
 import { useState, useRef, useMemo, useEffect, useCallback } from "react";
-import { Volume2, Upload, Mic, FileAudio } from "lucide-react";
+import { Volume2, Upload, Mic, FileAudio, Clock } from "lucide-react";
 import { textToSpeech, speechToText } from "../../api/endpoints/speech";
 import { cn, generateId } from "../../shared/utils";
 import { useDefaultModel } from "../../shared/useDefaultModel";
-import { saveGeneration, setSetting } from "../../db";
+import { saveGeneration, setSetting, getGenerations } from "../../db";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { Generation } from "../../shared/types";
 
 type Tab = "tts" | "stt";
 
@@ -17,7 +18,6 @@ const STT_LANGUAGES = [
 
 const AUDIO_EXTENSIONS = ["mp3", "wav", "flac", "ogg", "m4a"];
 
-// Known voices per TTS model family. Key is a substring matched against model ID.
 const VOICE_MAP: Record<string, string[]> = {
   openai: ["alloy", "echo", "fable", "onyx", "nova", "shimmer"],
   grok: ["eve", "ara", "rex", "sal", "leo"],
@@ -48,6 +48,34 @@ function extFromPath(path: string): string {
   return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
+function parseTtsRequest(json: string): { text: string; model: string; voice: string } | null {
+  try {
+    const parsed = JSON.parse(json);
+    return { text: parsed.text || "", model: parsed.model || "", voice: parsed.voice || "" };
+  } catch {
+    return null;
+  }
+}
+
+function parseSttResponse(json: string | null): { text?: string; duration?: number } | null {
+  if (!json) return null;
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+function parseSttRequest(json: string): { fileName: string; model: string; language: string } | null {
+  try {
+    const parsed = JSON.parse(json);
+    const fp = parsed.filePath || "";
+    return { fileName: fileNameFromPath(fp), model: parsed.model || "", language: parsed.language || "" };
+  } catch {
+    return null;
+  }
+}
+
 export default function SpeechLabPage() {
   const [tab, setTab] = useState<Tab>("tts");
 
@@ -74,6 +102,33 @@ export default function SpeechLabPage() {
 
   const voices = useMemo(() => getVoicesForModel(ttsModel.defaultModel), [ttsModel.defaultModel]);
   const supportsVoice = useMemo(() => isVoiceSupported(ttsModel.defaultModel), [ttsModel.defaultModel]);
+
+  const [ttsHistory, setTtsHistory] = useState<Generation[]>([]);
+  const [sttHistory, setSttHistory] = useState<Generation[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+
+  const reloadHistory = useCallback(async () => {
+    try {
+      const gens = await getGenerations();
+      setTtsHistory(gens.filter((g) => g.endpoint === "/v1/audio/speech"));
+      setSttHistory(gens.filter((g) => g.endpoint === "/v1/audio/transcriptions"));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getGenerations()
+      .then((gens) => {
+        if (cancelled) return;
+        setTtsHistory(gens.filter((g) => g.endpoint === "/v1/audio/speech"));
+        setSttHistory(gens.filter((g) => g.endpoint === "/v1/audio/transcriptions"));
+        setHistoryLoaded(true);
+      })
+      .catch(() => setHistoryLoaded(true));
+    return () => { cancelled = true; };
+  }, []);
 
   // --- TTS handlers ---
 
@@ -115,6 +170,7 @@ export default function SpeechLabPage() {
         model: ttsModel.defaultModel,
         endpoint: "/v1/audio/speech",
         requestJson: JSON.stringify({ text: ttsText, model: ttsModel.defaultModel, voice: effectiveVoice }),
+        responseJson: JSON.stringify({ type: "tts", text: ttsText }),
         status: "completed",
         mediaPath: null,
         mediaType: "audio/mp3",
@@ -122,10 +178,19 @@ export default function SpeechLabPage() {
         costRub: null,
         generationId: null,
       });
+      await reloadHistory();
     } catch (e) {
       setError(String(e));
     }
     setLoading(false);
+  };
+
+  const handleTtsRestore = (text: string, model: string, voice: string) => {
+    setTtsText(text);
+    ttsModel.setDefaultModel(model);
+    setSetting("default_tts_model", model).catch(() => {});
+    setTtsVoice(voice);
+    setCustomVoice("");
   };
 
   // --- STT handlers ---
@@ -181,6 +246,7 @@ export default function SpeechLabPage() {
           model: sttModel.defaultModel,
           language: sttLanguage || null,
         }),
+        responseJson: JSON.stringify({ text: parsed.text, duration: parsed.duration }),
         status: "completed",
         mediaPath: sttFilePath,
         mediaType: `audio/${extFromPath(sttFilePath)}`,
@@ -188,13 +254,13 @@ export default function SpeechLabPage() {
         costRub: parsed.duration ? Math.ceil(parsed.duration / 60) * 6 : null,
         generationId: null,
       });
+      await reloadHistory();
     } catch (e) {
       setError(String(e));
     }
     setLoading(false);
   };
 
-  // Drag-and-drop via Tauri window event (gives native file paths)
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     const w = getCurrentWindow();
@@ -309,12 +375,43 @@ export default function SpeechLabPage() {
               <audio ref={audioRef} src={audioUrl} controls className="w-full" />
             </div>
           )}
+
+          {historyLoaded && ttsHistory.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-xs font-medium text-zinc-500">
+                <Clock className="h-3.5 w-3.5" />
+                History
+              </div>
+              <div className="max-h-64 space-y-1 overflow-y-auto">
+                {ttsHistory.map((gen) => {
+                  const req = parseTtsRequest(gen.requestJson);
+                  return (
+                    <button
+                      key={gen.id}
+                      onClick={() => {
+                        if (req) handleTtsRestore(req.text, req.model, req.voice);
+                      }}
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-left transition-colors hover:border-zinc-700"
+                    >
+                      <div className="truncate text-sm text-zinc-300">
+                        {req?.text || "(empty)"}
+                      </div>
+                      <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
+                        <span>{req?.model}</span>
+                        {req?.voice && <span>&middot; {req.voice}</span>}
+                        <span>&middot; {new Date(gen.createdAt).toLocaleString()}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {tab === "stt" && (
         <div className="space-y-4">
-          {/* Drop zone */}
           <div
             onClick={pickSttFile}
             className={cn(
@@ -347,7 +444,6 @@ export default function SpeechLabPage() {
             )}
           </div>
 
-          {/* Model + language + transcribe button */}
           {sttFilePath && (
             <>
               <div className="flex gap-3">
@@ -402,6 +498,40 @@ export default function SpeechLabPage() {
                 rows={8}
                 className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-sm text-white outline-none"
               />
+            </div>
+          )}
+
+          {historyLoaded && sttHistory.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-xs font-medium text-zinc-500">
+                <Clock className="h-3.5 w-3.5" />
+                History
+              </div>
+              <div className="max-h-64 space-y-1 overflow-y-auto">
+                {sttHistory.map((gen) => {
+                  const req = parseSttRequest(gen.requestJson);
+                  const resp = parseSttResponse(gen.responseJson);
+                  return (
+                    <button
+                      key={gen.id}
+                      onClick={() => {
+                        setSttResult(resp?.text || "(no text)");
+                        setSttDuration(resp?.duration ?? null);
+                      }}
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-left transition-colors hover:border-zinc-700"
+                    >
+                      <div className="truncate text-sm text-zinc-300">
+                        {resp?.text || "(no transcription)"}
+                      </div>
+                      <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
+                        <span>{req?.fileName || "unknown"}</span>
+                        <span>&middot; {req?.model}</span>
+                        <span>&middot; {new Date(gen.createdAt).toLocaleString()}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

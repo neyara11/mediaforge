@@ -1,10 +1,10 @@
-import { useState, useRef, useCallback, useMemo } from "react";
-import { Image, Download, SlidersHorizontal, Upload, X } from "lucide-react";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import { Image, Download, SlidersHorizontal, Upload, X, History } from "lucide-react";
 import { generateImage } from "../../api/endpoints/images";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
 import { useDefaultModel } from "../../shared/useDefaultModel";
-import { saveGeneration, setSetting } from "../../db";
+import { saveGeneration, setSetting, getGenerations } from "../../db";
 
 interface ImageResult {
   id: string;
@@ -44,6 +44,7 @@ export default function ImageStudioPage() {
   const [showPromptBuilder, setShowPromptBuilder] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [referenceImage, setReferenceImage] = useState<ReferenceImage | null>(null);
+  const [historyImages, setHistoryImages] = useState<ImageResult[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -64,6 +65,40 @@ export default function ImageStudioPage() {
   }, [defaultModel]);
 
   const imageN = modelCaps.maxN >= 4 ? 4 : 1;
+
+  useEffect(() => {
+    const loadHistory = async () => {
+      try {
+        const gens = await getGenerations();
+        const imageGens = gens.filter(
+          (g) => g.endpoint === "/v1/images" && g.status === "completed",
+        );
+        const images: ImageResult[] = [];
+        for (const g of imageGens) {
+          if (!g.responseJson) continue;
+          try {
+            const parsed = JSON.parse(g.responseJson);
+            const data: { b64_json?: string }[] = parsed?.data ?? [];
+            for (const d of data) {
+              if (d.b64_json) {
+                images.push({
+                  id: `${g.id}_${images.length}`,
+                  b64: d.b64_json,
+                  model: g.model,
+                });
+              }
+            }
+          } catch {
+            /* skip malformed JSON */
+          }
+        }
+        setHistoryImages(images);
+      } catch (e) {
+        console.error("Failed to load image history:", e);
+      }
+    };
+    loadHistory();
+  }, []);
 
   const handleModelChange = (newModel: string) => {
     setDefaultModel(newModel);
@@ -129,6 +164,7 @@ export default function ImageStudioPage() {
         model: defaultModel,
         endpoint: "/v1/images",
         requestJson: JSON.stringify({ prompt, model: defaultModel, size, quality }),
+        responseJson: result,
         status: "completed",
         mediaPath: null,
         mediaType: "image/png",
@@ -148,6 +184,13 @@ export default function ImageStudioPage() {
     link.download = `mediaforge-${img.id}.png`;
     link.href = `data:image/png;base64,${img.b64}`;
     link.click();
+  };
+
+  const handleSelectFromHistory = (img: ImageResult) => {
+    setSelected(img);
+    if (!results.some((r) => r.id === img.id)) {
+      setResults([img]);
+    }
   };
 
   return (
@@ -307,13 +350,44 @@ export default function ImageStudioPage() {
             </div>
           )}
 
-          {!loading && results.length === 0 && !error && (
+          {!loading && results.length === 0 && historyImages.length === 0 && !error && (
             <div className="flex h-64 items-center justify-center text-zinc-600">
               <div className="text-center">
                 <Image className="mx-auto mb-3 h-8 w-8 opacity-50" />
                 <p className="text-sm">Введите промпт и нажмите Generate</p>
               </div>
             </div>
+          )}
+
+          {historyImages.length > 0 && (
+            <>
+              <div className="mb-3 mt-6 flex items-center gap-2">
+                <History className="h-4 w-4 text-zinc-500" />
+                <span className="text-xs font-medium text-zinc-500">History</span>
+                <div className="flex-1 border-t border-zinc-800" />
+                <span className="text-xs text-zinc-600">{historyImages.length} images</span>
+              </div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {historyImages.map((img) => (
+                  <button
+                    key={img.id}
+                    onClick={() => handleSelectFromHistory(img)}
+                    className={cn(
+                      "overflow-hidden rounded-lg border transition-colors",
+                      selected?.id === img.id
+                        ? "border-violet-500"
+                        : "border-zinc-800 hover:border-zinc-600",
+                    )}
+                  >
+                    <img
+                      src={`data:image/png;base64,${img.b64}`}
+                      alt=""
+                      className="aspect-square w-full object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+            </>
           )}
         </div>
       </div>

@@ -7,7 +7,7 @@ import { chatCompletion, chatAudioGenerate } from "../../api/endpoints/chat";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
 import { useDefaultModel } from "../../shared/useDefaultModel";
-import { saveGeneration, setSetting } from "../../db";
+import { saveGeneration, getGenerations, setSetting } from "../../db";
 import type { ChatMessage } from "../../api/types";
 
 interface Track {
@@ -18,6 +18,12 @@ interface Track {
   audioUrl: string | null;
   audioBase64: string;
   audioFormat: string;
+}
+
+interface SavedTrackData {
+  lyrics: string;
+  audio_base64: string;
+  audio_format: string;
 }
 
 function base64ToBlob(base64: string, mimeType: string): Blob {
@@ -50,6 +56,7 @@ export default function MusicStudioPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [loadedFromDb, setLoadedFromDb] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentTrackRef = useRef<Track | null>(null);
@@ -60,11 +67,9 @@ export default function MusicStudioPage() {
 
   const isRu = i18n.language === "ru";
 
-  // Sync refs with state to avoid stale closures in event handlers
   useEffect(() => { currentTrackRef.current = currentTrack; }, [currentTrack]);
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
 
-  // Initialize audio element once, with all event listeners
   useEffect(() => {
     const audio = new Audio();
     audio.preload = "auto";
@@ -90,7 +95,6 @@ export default function MusicStudioPage() {
       audio.removeEventListener("pause", onPause);
       audio.pause();
       audio.src = "";
-      // Revoke ALL object URLs only on unmount
       for (const url of audioUrlsRef.current) {
         URL.revokeObjectURL(url);
       }
@@ -98,11 +102,94 @@ export default function MusicStudioPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (loadedFromDb) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const generations = await getGenerations();
+        if (cancelled) return;
+
+        const musicGenerations = generations.filter(
+          (g) =>
+            g.endpoint === "/v1/chat/completions" &&
+            (g.mediaType?.startsWith("audio/") || g.mediaType === "text/lyrics") &&
+            g.status === "completed"
+        );
+
+        const loadedTracks: Track[] = [];
+
+        for (const gen of musicGenerations) {
+          let trackData: SavedTrackData | null = null;
+          if (gen.responseJson) {
+            try {
+              trackData = JSON.parse(gen.responseJson);
+            } catch {
+              // fall through
+            }
+          }
+
+          let audioUrl: string | null = null;
+          let audioBase64 = "";
+          let audioFormat = "mp3";
+
+          if (trackData?.audio_base64) {
+            audioBase64 = trackData.audio_base64;
+            audioFormat = trackData.audio_format || "mp3";
+            const mimeType = audioFormat === "wav" ? "audio/wav" : "audio/mpeg";
+            const blob = base64ToBlob(audioBase64, mimeType);
+            audioUrl = URL.createObjectURL(blob);
+            audioUrlsRef.current.add(audioUrl);
+          }
+
+          let reqData: { prompt?: string; genre?: string; tempo?: string } = {};
+          if (gen.requestJson) {
+            try {
+              reqData = JSON.parse(gen.requestJson);
+            } catch {
+              // ignore
+            }
+          }
+
+          const trackGenre = reqData.genre || "pop";
+          const loadedTrack: Track = {
+            id: gen.id,
+            name: `Track ${loadedTracks.length + 1}`,
+            genre: trackGenre,
+            lyrics: trackData?.lyrics || "",
+            audioUrl,
+            audioBase64,
+            audioFormat,
+          };
+
+          loadedTracks.push(loadedTrack);
+        }
+
+        if (!cancelled) {
+          // Renumber tracks with genre info
+          const renamed = loadedTracks.map((t, i) => ({
+            ...t,
+            name: `Track ${i + 1} — ${t.genre}`,
+          }));
+          setTracks(renamed);
+          setLoadedFromDb(true);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setLoadedFromDb(true);
+          console.error("Failed to load tracks from DB:", e);
+        }
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [loadedFromDb]);
+
   const playTrack = useCallback((track: Track) => {
     const audio = audioRef.current;
     if (!audio || !track.audioUrl) return;
 
-    // Use refs to avoid stale closure issues
     if (currentTrackRef.current?.id === track.id && isPlayingRef.current) {
       audio.pause();
     } else {
@@ -112,7 +199,6 @@ export default function MusicStudioPage() {
   }, []);
 
   const selectTrack = useCallback((track: Track) => {
-    // Update ref immediately so playTrack sees the right track
     currentTrackRef.current = track;
     setCurrentTrack(track);
     setLyrics(track.lyrics);
@@ -230,11 +316,16 @@ Genre: ${genre}, Tempo: ${tempo}`,
       setCurrentTime(0);
       setDuration(0);
 
-      // Auto-play the generated track
       if (audioUrl && audioRef.current) {
         audioRef.current.src = audioUrl;
         audioRef.current.play().catch(console.error);
       }
+
+      const responseJson = JSON.stringify({
+        lyrics: result.lyrics,
+        audio_base64: result.audio_base64,
+        audio_format: result.audio_format,
+      });
 
       await saveGeneration({
         id: trackId,
@@ -242,6 +333,7 @@ Genre: ${genre}, Tempo: ${tempo}`,
         model: audioModel.defaultModel,
         endpoint: "/v1/chat/completions",
         requestJson: JSON.stringify({ prompt: trackPrompt, genre, tempo, model: audioModel.defaultModel }),
+        responseJson,
         status: "completed",
         mediaPath: audioUrl,
         mediaType: result.audio_base64 ? `audio/${result.audio_format}` : "text/lyrics",
@@ -348,7 +440,6 @@ Genre: ${genre}, Tempo: ${tempo}`,
 
         <div className="flex flex-1 overflow-hidden">
           <div className="flex flex-1 flex-col overflow-hidden">
-            {/* Audio player bar */}
             {hasAudio && (
               <div className="border-b border-zinc-800 bg-zinc-900/50 px-4 py-3">
                 <div className="flex items-center gap-3">
@@ -391,7 +482,6 @@ Genre: ${genre}, Tempo: ${tempo}`,
               </div>
             )}
 
-            {/* Lyrics area */}
             <div className="flex-1 overflow-auto p-4">
               <div className="flex h-full flex-col rounded-lg border border-zinc-800 bg-zinc-900 p-4">
                 <h3 className="mb-3 text-sm font-medium text-zinc-400">

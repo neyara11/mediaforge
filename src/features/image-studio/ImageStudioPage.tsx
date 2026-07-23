@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { Image, Download, SlidersHorizontal, Upload, X } from "lucide-react";
 import { generateImage } from "../../api/endpoints/images";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
@@ -49,6 +49,22 @@ export default function ImageStudioPage() {
 
   const { defaultModel, setDefaultModel, availableModels } = useDefaultModel("image");
 
+  const modelCaps = useMemo(() => {
+    const m = defaultModel.toLowerCase();
+    const isDalle = m.includes("dall-e") || m.includes("gpt-image");
+    const isSeed = m.includes("seed") || m.includes("seedream");
+    return {
+      supportsQuality: isDalle,
+      maxN: isDalle ? 4 : 1,
+      sizeOptions: isSeed
+        ? ["1920x1920", "2048x2048", "2304x1728", "1728x2304"]
+        : ["1024x1024", "1792x1024", "1024x1792"],
+      defaultSize: isSeed ? "1920x1920" : "1024x1024",
+    };
+  }, [defaultModel]);
+
+  const imageN = modelCaps.maxN >= 4 ? 4 : 1;
+
   const handleModelChange = (newModel: string) => {
     setDefaultModel(newModel);
     setSetting("default_image_model", newModel).catch(() => {});
@@ -87,7 +103,7 @@ export default function ImageStudioPage() {
       const result = await generateImage({
         prompt: prompt.trim(),
         model: defaultModel,
-        n: 4,
+        n: imageN,
         size,
         quality,
         input_references: inputRefs,
@@ -195,20 +211,25 @@ export default function ImageStudioPage() {
               onChange={(e) => setSize(e.target.value)}
               className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-white outline-none"
             >
-              <option value="1024x1024">1:1 (1024)</option>
-              <option value="1792x1024">16:9 (1792)</option>
-              <option value="1024x1792">9:16 (1024)</option>
+              {modelCaps.sizeOptions.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
             </select>
-            <select
-              value={quality}
-              onChange={(e) => setQuality(e.target.value)}
-              className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-white outline-none"
-            >
-              <option value="auto">Auto</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
+            {modelCaps.supportsQuality && (
+              <select
+                value={quality}
+                onChange={(e) => setQuality(e.target.value)}
+                className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-white outline-none"
+              >
+                <option value="auto">Auto</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            )}
+            <span className="text-xs text-zinc-600">
+              {imageN > 1 ? `×${imageN}` : ""}
+            </span>
             <input
               ref={fileInputRef}
               type="file"

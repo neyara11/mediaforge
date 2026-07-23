@@ -12,16 +12,20 @@ const SYSTEM_PROMPTS: Record<string, string> = {
   image: `You are an expert at creating prompts for AI image generation.
 The user describes what they want in simple words.
 Your task is to turn this into a detailed, structured prompt.
+Write the prompt in the SAME LANGUAGE the user used in their input.
 
 Include: main subject, environment, lighting, style, composition, camera angle, color palette, technical parameters (8K, detailed, etc).
 Return ONLY the prompt, no explanations.`,
 
   video: `You are an expert at creating prompts for AI video generation.
 Turn the user's description into a detailed video prompt.
+Write the prompt in the SAME LANGUAGE the user used in their input.
+
 Include: scene and action, camera movement, lighting and time of day, style, duration.
 Return ONLY the prompt, no explanations.`,
 
   lyrics: `You are a songwriter. Create song lyrics based on the user's theme.
+Write the lyrics in the SAME LANGUAGE the user used in their input.
 Structure: [Intro], [Verse 1], [Chorus], [Verse 2], [Chorus], [Bridge], [Chorus], [Outro].
 Return ONLY the lyrics with structure tags, no explanations or markdown.`,
 };

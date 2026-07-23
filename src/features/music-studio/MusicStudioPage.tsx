@@ -393,27 +393,25 @@ Genre: ${genre}, Tempo: ${tempo}`,
 
             {/* Lyrics area */}
             <div className="flex-1 overflow-auto p-4">
-              {lyrics ? (
-                <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-                  <h3 className="mb-3 text-sm font-medium text-zinc-400">
-                    {isRu ? "Текст песни" : "Lyrics"}
-                  </h3>
-                  <pre className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-300">
-                    {lyrics}
-                  </pre>
-                </div>
-              ) : (
-                <div className="flex h-full items-center justify-center text-zinc-600">
-                  <div className="text-center">
-                    <Music className="mx-auto mb-3 h-8 w-8 opacity-50" />
-                    <p className="text-sm">
-                      {isRu
-                        ? "Опишите песню и нажмите «Текст песни» или «Создать музыку»"
-                        : "Describe a song and click Lyrics or Generate Music"}
-                    </p>
-                  </div>
-                </div>
-              )}
+              <div className="flex h-full flex-col rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+                <h3 className="mb-3 text-sm font-medium text-zinc-400">
+                  {isRu ? "Текст песни" : "Lyrics"}
+                  <span className="ml-2 text-xs font-normal text-zinc-600">
+                    {isRu ? "— можно редактировать" : "— editable"}
+                  </span>
+                </h3>
+                <textarea
+                  value={lyrics}
+                  onChange={(e) => setLyrics(e.target.value)}
+                  placeholder={
+                    isRu
+                      ? "Вставьте или напишите текст песни здесь...\n\n[Verse 1]\n...\n[Chorus]\n..."
+                      : "Paste or type lyrics here...\n\n[Verse 1]\n...\n[Chorus]\n..."
+                  }
+                  rows={16}
+                  className="flex-1 w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm leading-relaxed text-zinc-300 placeholder-zinc-600 outline-none focus:border-violet-500"
+                />
+              </div>
             </div>
           </div>
 

@@ -81,10 +81,14 @@ export default function ImageStudioPage() {
         const historyFromDb = completed;
         const images: ImageResult[] = [];
         for (const g of historyFromDb) {
-          if (!g.responseJson) continue;
+          if (!g.responseJson) {
+            console.log("Skipping gen (no responseJson):", g.id);
+            continue;
+          }
           try {
             const parsed = JSON.parse(g.responseJson);
             const data: { b64_json?: string }[] = parsed?.data ?? [];
+            console.log(`Gen ${g.id}: ${data.length} images in responseJson`);
             for (const d of data) {
               if (d.b64_json) {
                 images.push({

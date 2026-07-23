@@ -12,6 +12,7 @@ pub struct ProjectRow {
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
 pub struct GenerationRow {
     pub id: String,
     pub project_id: Option<String>,

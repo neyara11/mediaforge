@@ -70,6 +70,7 @@ export default function ImageStudioPage() {
     const loadHistory = async () => {
       try {
         const gens = await getGenerations();
+        console.log(`Loaded ${gens.length} generations from DB`);
         const imageGens = gens.filter(
           (g) => g.endpoint === "/v1/images" && g.status === "completed",
         );
@@ -175,8 +176,10 @@ export default function ImageStudioPage() {
           costRub: parsed?.usage?.cost ?? null,
           generationId: parsed?.generation_id ?? null,
         });
+        console.log("Image saved to DB:", genId);
       } catch (e) {
         console.error("saveGeneration failed:", e);
+        setError(`Ошибка сохранения: ${e}`);
       }
     } catch (e) {
       setError(String(e));

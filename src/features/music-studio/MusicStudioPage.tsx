@@ -339,8 +339,10 @@ Genre: ${genre}, Tempo: ${tempo}`,
           costRub: result.cost,
           generationId: null,
         });
+        console.log("Track saved to DB:", trackId);
       } catch (e) {
         console.error("saveGeneration failed:", e);
+        setError(`Ошибка сохранения: ${e}`);
       }
     } catch (e) {
       setError(String(e));

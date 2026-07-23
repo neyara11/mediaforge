@@ -61,6 +61,7 @@ pub fn run() {
             commands::chat::chat_completion,
             commands::models::fetch_models,
             commands::models::get_model_info,
+            commands::auth::check_auth,
             commands::auth::set_api_key,
             commands::auth::test_connection,
             commands::auth::get_balance,

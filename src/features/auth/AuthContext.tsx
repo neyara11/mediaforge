@@ -1,11 +1,12 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
-import { setApiKey, testConnection } from "../../api/endpoints/auth";
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { setApiKey, testConnection, checkAuth } from "../../api/endpoints/auth";
 
 interface AuthState {
   isAuthenticated: boolean;
   apiKey: string | null;
   balance: string | null;
   onboardingComplete: boolean;
+  initialized: boolean;
 }
 
 interface AuthContextValue extends AuthState {
@@ -22,7 +23,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     apiKey: null,
     balance: null,
     onboardingComplete: false,
+    initialized: false,
   });
+
+  useEffect(() => {
+    checkAuth().then((hasKey) => {
+      if (hasKey) {
+        setState({
+          isAuthenticated: true,
+          apiKey: null,
+          balance: null,
+          onboardingComplete: true,
+          initialized: true,
+        });
+      } else {
+        setState((prev) => ({ ...prev, initialized: true }));
+      }
+    }).catch(() => {
+      setState((prev) => ({ ...prev, initialized: true }));
+    });
+  }, []);
 
   const login = useCallback(async (key: string) => {
     try {
@@ -35,6 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         apiKey: key,
         balance: balance?.toString() ?? null,
         onboardingComplete: false,
+        initialized: true,
       });
       return { success: true, balance: balance?.toString() };
     } catch (e) {
@@ -49,6 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       apiKey: null,
       balance: null,
       onboardingComplete: false,
+      initialized: true,
     });
   }, []);
 

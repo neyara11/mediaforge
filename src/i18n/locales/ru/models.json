@@ -23,6 +23,7 @@
   "defaultStt": "Распознавание",
   "defaultVideo": "Видео",
   "defaultText": "Текст (LLM)",
+  "modelsAudio": "Аудио",
   "perImage": "₽/изобр.",
   "perChar": "₽/символ",
   "perSec": "₽/сек",

@@ -4,6 +4,12 @@ use tauri_plugin_store::StoreExt;
 use crate::api::client::{ApiState, api_get};
 
 #[tauri::command]
+pub async fn check_auth(app: tauri::AppHandle) -> Result<bool, String> {
+    let store = app.store("settings.json").map_err(|e| e.to_string())?;
+    Ok(store.get("api_key").and_then(|v| v.as_str().map(|s| !s.is_empty())).unwrap_or(false))
+}
+
+#[tauri::command]
 pub async fn set_api_key(
     app: tauri::AppHandle,
     state: State<'_, ApiState>,

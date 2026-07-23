@@ -9,7 +9,17 @@ import SettingsPage from "./features/settings/SettingsPage";
 import OnboardingPage from "./features/auth/OnboardingPage";
 
 function AppRoutes() {
-  const { onboardingComplete } = useAuth();
+  const { onboardingComplete, initialized } = useAuth();
+
+  if (!initialized) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-zinc-950">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-sm font-bold text-white">
+          M
+        </div>
+      </div>
+    );
+  }
 
   if (!onboardingComplete) {
     return (

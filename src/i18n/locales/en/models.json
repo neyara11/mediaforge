@@ -23,6 +23,7 @@
   "defaultStt": "Speech to Text",
   "defaultVideo": "Video",
   "defaultText": "Text (LLM)",
+  "modelsAudio": "Audio",
   "perImage": "₽/image",
   "perChar": "₽/char",
   "perSec": "₽/sec",

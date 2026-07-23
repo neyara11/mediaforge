@@ -9,7 +9,7 @@ export interface ImageGenerationParams {
 export interface SpeechParams {
   text: string;
   model: string;
-  voice: string;
+  voice?: string | null;
   format?: "mp3" | "pcm";
   speed?: number;
 }

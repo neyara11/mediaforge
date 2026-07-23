@@ -8,17 +8,21 @@ pub async fn text_to_speech(
     state: State<'_, ApiState>,
     text: String,
     model: String,
-    voice: String,
+    voice: Option<String>,
     format: Option<String>,
     speed: Option<f64>,
 ) -> Result<Vec<u8>, String> {
-    let body = json!({
+    let mut body = json!({
         "model": model,
         "input": text,
-        "voice": voice,
         "response_format": format.unwrap_or_else(|| "mp3".to_string()),
         "speed": speed.unwrap_or(1.0),
     });
+    if let Some(ref v) = voice {
+        if !v.is_empty() {
+            body["voice"] = json!(v);
+        }
+    }
     api_post_binary(&state, "/audio/speech", &body.to_string()).await
 }
 

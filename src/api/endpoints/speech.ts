@@ -5,7 +5,7 @@ export async function textToSpeech(params: SpeechParams): Promise<number[]> {
   return apiInvoke("text_to_speech", {
     text: params.text,
     model: params.model,
-    voice: params.voice,
+    voice: params.voice ?? null,
     format: params.format ?? "mp3",
     speed: params.speed ?? 1.0,
   });

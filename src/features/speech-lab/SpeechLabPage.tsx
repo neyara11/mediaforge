@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { Volume2, Upload } from "lucide-react";
 import { textToSpeech } from "../../api/endpoints/speech";
 import { cn, generateId } from "../../shared/utils";
@@ -7,10 +7,35 @@ import { saveGeneration, setSetting } from "../../db";
 
 type Tab = "tts" | "stt";
 
+// Known voices per TTS model family. Key is a substring matched against model ID.
+const VOICE_MAP: Record<string, string[]> = {
+  openai: ["alloy", "echo", "fable", "onyx", "nova", "shimmer"],
+  grok: ["eve", "adam", "nova", "sage", "lumen"],
+  "elevenlabs": ["rachel", "domi", "bella", "antoni", "elli", "josh", "arnold", "adam", "sam"],
+  minimax: ["male-qn-qingse", "female-qn-qingse", "male-qn-jingying", "presenter_male", "presenter_female"],
+  qwen: [],  // Qwen TTS may not support voice parameter — use empty string
+};
+
+function getVoicesForModel(modelId: string): string[] {
+  const id = modelId.toLowerCase();
+  for (const [key, voices] of Object.entries(VOICE_MAP)) {
+    if (id.includes(key)) return voices;
+  }
+  // Unknown model: return OpenAI voices as common fallback
+  return ["alloy", "echo", "fable", "onyx", "nova", "shimmer"];
+}
+
+function isVoiceSupported(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  if (id.includes("qwen")) return false;
+  return true;
+}
+
 export default function SpeechLabPage() {
   const [tab, setTab] = useState<Tab>("tts");
   const [ttsText, setTtsText] = useState("");
   const [ttsVoice, setTtsVoice] = useState("eve");
+  const [customVoice, setCustomVoice] = useState("");
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [loading, setLoading] = useState(false);
@@ -18,10 +43,24 @@ export default function SpeechLabPage() {
 
   const { defaultModel, setDefaultModel, availableModels } = useDefaultModel("tts");
 
+  const voices = useMemo(() => getVoicesForModel(defaultModel), [defaultModel]);
+  const supportsVoice = useMemo(() => isVoiceSupported(defaultModel), [defaultModel]);
+
   const handleModelChange = (newModel: string) => {
     setDefaultModel(newModel);
     setSetting("default_tts_model", newModel).catch(() => {});
+    // Reset voice to first available for this model
+    const newVoices = getVoicesForModel(newModel);
+    if (newVoices.length > 0) {
+      setTtsVoice(newVoices[0]);
+      setCustomVoice("");
+    } else {
+      setTtsVoice("");
+      setCustomVoice("");
+    }
   };
+
+  const effectiveVoice = customVoice || ttsVoice;
 
   const handleTts = async () => {
     if (!ttsText.trim()) return;
@@ -31,7 +70,7 @@ export default function SpeechLabPage() {
       const audioData = await textToSpeech({
         text: ttsText.trim(),
         model: defaultModel,
-        voice: ttsVoice,
+        voice: effectiveVoice || null,
         format: "mp3",
       });
       const blob = new Blob([new Uint8Array(audioData)], { type: "audio/mpeg" });
@@ -45,7 +84,7 @@ export default function SpeechLabPage() {
         projectId: null,
         model: defaultModel,
         endpoint: "/v1/audio/speech",
-        requestJson: JSON.stringify({ text: ttsText, model: defaultModel, voice: ttsVoice }),
+        requestJson: JSON.stringify({ text: ttsText, model: defaultModel, voice: effectiveVoice }),
         status: "completed",
         mediaPath: null,
         mediaType: "audio/mp3",
@@ -98,15 +137,31 @@ export default function SpeechLabPage() {
               ))}
             </select>
             <select
-              value={ttsVoice}
-              onChange={(e) => setTtsVoice(e.target.value)}
+              value={supportsVoice ? ttsVoice : "__custom__"}
+              onChange={(e) => {
+                if (e.target.value === "__custom__") {
+                  setTtsVoice("");
+                } else {
+                  setTtsVoice(e.target.value);
+                  setCustomVoice("");
+                }
+              }}
               className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none"
+              disabled={!supportsVoice && voices.length === 0}
             >
-              <option value="eve">Eve</option>
-              <option value="alloy">Alloy</option>
-              <option value="nova">Nova</option>
-              <option value="shimmer">Shimmer</option>
+              {voices.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+              <option value="__custom__">Другой...</option>
             </select>
+            {(!supportsVoice || ttsVoice === "__custom__" || voices.length === 0) && (
+              <input
+                value={customVoice}
+                onChange={(e) => setCustomVoice(e.target.value)}
+                placeholder={supportsVoice ? "ID голоса" : "Без голоса"}
+                className="w-24 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-violet-500"
+              />
+            )}
             <button
               onClick={handleTts}
               disabled={!ttsText.trim() || loading}

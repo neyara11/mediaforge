@@ -42,8 +42,11 @@ pub async fn chat_audio_generate(
 
     let raw = api_post_stream(&state, "/chat/completions", &body.to_string()).await?;
 
+    eprintln!("[Audio SSE] raw response length: {}, first 500 chars: {}", raw.len(), &raw[..raw.len().min(500)]);
+
     let mut pcm_buffer: Vec<i16> = Vec::new();
     let sample_rate = 24000u32;
+    let mut logged = false;
 
     for line in raw.lines() {
         let line = line.trim();
@@ -51,17 +54,25 @@ pub async fn chat_audio_generate(
             continue;
         }
         if let Some(data) = line.strip_prefix("data: ") {
+            if !logged {
+                eprintln!("[Audio SSE] first chunk: {}", &data[..data.len().min(300)]);
+                logged = true;
+            }
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
-                if let Some(choices) = parsed["choices"].as_array() {
-                    for choice in choices {
-                        if let Some(audio_b64) = choice["delta"]["audio"].as_str() {
-                            if let Ok(bytes) = base64_decode(audio_b64) {
-                                for chunk in bytes.chunks_exact(2) {
-                                    if chunk.len() == 2 {
-                                        let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
-                                        pcm_buffer.push(sample);
-                                    }
-                                }
+                // Try multiple audio extraction patterns
+                let audio_b64 = parsed["choices"]
+                    .as_array()
+                    .and_then(|c| c.first())
+                    .and_then(|c| c["delta"]["audio"].as_str())
+                    .or_else(|| parsed["audio"].as_str())
+                    .or_else(|| parsed["delta"].as_str());
+
+                if let Some(b64) = audio_b64 {
+                    if let Ok(bytes) = base64_decode(b64) {
+                        for chunk in bytes.chunks_exact(2) {
+                            if chunk.len() == 2 {
+                                let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
+                                pcm_buffer.push(sample);
                             }
                         }
                     }
@@ -69,6 +80,8 @@ pub async fn chat_audio_generate(
             }
         }
     }
+
+    eprintln!("[Audio SSE] total PCM samples: {}", pcm_buffer.len());
 
     if pcm_buffer.is_empty() {
         return Err("No audio data received from API".to_string());

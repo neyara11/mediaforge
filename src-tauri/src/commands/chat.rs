@@ -42,11 +42,11 @@ pub async fn chat_audio_generate(
 
     let raw = api_post_stream(&state, "/chat/completions", &body.to_string()).await?;
 
-    eprintln!("[Audio SSE] raw response length: {}, first 500 chars: {}", raw.len(), &raw[..raw.len().min(500)]);
+    eprintln!("[Audio SSE] raw response length: {}, first 300 chars: {:?}", raw.len(), &raw[..raw.len().min(300)]);
 
     let mut pcm_buffer: Vec<i16> = Vec::new();
     let sample_rate = 24000u32;
-    let mut logged = false;
+    let mut sse_count = 0u32;
 
     for line in raw.lines() {
         let line = line.trim();
@@ -54,12 +54,11 @@ pub async fn chat_audio_generate(
             continue;
         }
         if let Some(data) = line.strip_prefix("data: ") {
-            if !logged {
-                eprintln!("[Audio SSE] first chunk: {}", &data[..data.len().min(300)]);
-                logged = true;
+            sse_count += 1;
+            if sse_count == 1 {
+                eprintln!("[Audio SSE] first SSE data: {}", &data[..data.len().min(300)]);
             }
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
-                // Try multiple audio extraction patterns
                 let audio_b64 = parsed["choices"]
                     .as_array()
                     .and_then(|c| c.first())
@@ -71,17 +70,20 @@ pub async fn chat_audio_generate(
                     if let Ok(bytes) = base64_decode(b64) {
                         for chunk in bytes.chunks_exact(2) {
                             if chunk.len() == 2 {
-                                let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
-                                pcm_buffer.push(sample);
+                                pcm_buffer.push(i16::from_le_bytes([chunk[0], chunk[1]]));
                             }
                         }
+                    }
+                } else if sse_count == 1 {
+                    if let Some(obj) = parsed.as_object() {
+                        eprintln!("[Audio SSE] no audio found, JSON keys: {:?}", obj.keys().collect::<Vec<_>>());
                     }
                 }
             }
         }
     }
 
-    eprintln!("[Audio SSE] total PCM samples: {}", pcm_buffer.len());
+    eprintln!("[Audio SSE] lines processed, sse events: {}, pcm samples: {}", sse_count, pcm_buffer.len());
 
     if pcm_buffer.is_empty() {
         return Err("No audio data received from API".to_string());

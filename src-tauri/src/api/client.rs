@@ -205,5 +205,16 @@ pub async fn api_post_stream(
         return Err(format!("API error {}: {}", status, err_body));
     }
 
-    resp.text().await.map_err(|e| e.to_string())
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+
+    eprintln!("[API Stream] status={}, content-type={}, len={}", status, content_type, bytes.len());
+
+    String::from_utf8(bytes.to_vec()).map_err(|e| format!("UTF-8 error: {} (first 100 bytes: {:?})", e, &bytes[..bytes.len().min(100)]))
 }

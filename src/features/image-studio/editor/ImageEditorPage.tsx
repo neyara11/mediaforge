@@ -241,12 +241,34 @@ export default function ImageEditorPage() {
             setLoading(false);
             return;
           }
-          const { left, top, width, height } = cropRect;
+          let { left, top, width, height } = cropRect;
           if (width < 4 || height < 4) {
             setError("Область слишком мала");
             setLoading(false);
             return;
           }
+
+          const bgImgObj = canvas.getObjects().find(
+            (obj: any) => obj.type === "image" && obj.selectable === false && obj.evented === false,
+          );
+          if (bgImgObj) {
+            const imgLeft = bgImgObj.left!;
+            const imgTop = bgImgObj.top!;
+            const imgRight = imgLeft + (bgImgObj.width || 0) * (bgImgObj.scaleX || 1);
+            const imgBottom = imgTop + (bgImgObj.height || 0) * (bgImgObj.scaleY || 1);
+            if (left < imgLeft) { width -= imgLeft - left; left = imgLeft; }
+            if (top < imgTop) { height -= imgTop - top; top = imgTop; }
+            if (left + width > imgRight) { width = imgRight - left; }
+            if (top + height > imgBottom) { height = imgBottom - top; }
+          }
+          const size = Math.min(width, height);
+          if (size < 4) {
+            setError("Выделенная область за пределами изображения");
+            setLoading(false);
+            return;
+          }
+          width = size;
+          height = size;
 
           const fullB64 = canvasToBase64(canvas, "png");
           const hCanvas = document.createElement("canvas");
@@ -256,15 +278,15 @@ export default function ImageEditorPage() {
           const bgImg = await loadImageElement(`data:image/png;base64,${fullB64}`);
           hCtx.drawImage(bgImg, 0, 0);
           hCtx.fillStyle = "rgba(0, 255, 100, 0.12)";
-          hCtx.fillRect(left, top, width, height);
+          hCtx.fillRect(left, top, size, size);
           hCtx.strokeStyle = "rgba(0, 255, 100, 0.5)";
           hCtx.lineWidth = 2;
-          hCtx.strokeRect(left, top, width, height);
+          hCtx.strokeRect(left, top, size, size);
           const highlightedB64 = hCanvas.toDataURL("image/png").replace(/^data:image\/\w+;base64,/, "");
 
           const result = await invoke<string>("edit_region", {
             imageB64: highlightedB64,
-            prompt: prompt || "Regenerate only the green-bordered rectangle area. Match surrounding colors, lighting and style exactly. Keep everything outside the rectangle completely unchanged.",
+            prompt: prompt || "Regenerate only the green-bordered square area. Match surrounding colors, lighting and style exactly. Keep everything outside the square completely unchanged.",
             model: defaultModel,
           });
           const parsed = JSON.parse(result);
@@ -276,11 +298,21 @@ export default function ImageEditorPage() {
           }
 
           const resultFullImg = await loadImageElement(`data:image/png;base64,${resultB64}`);
+          const canvasW = canvas.getWidth();
+          const canvasH = canvas.getHeight();
+          const sx = resultFullImg.width / canvasW;
+          const sy = resultFullImg.height / canvasH;
+          const srcX = Math.floor(left * sx);
+          const srcY = Math.floor(top * sy);
+          const srcW = Math.floor(size * sx + 0.5);
+          const srcH = Math.floor(size * sy + 0.5);
+          const extractSize = Math.min(srcW, srcH);
           const extractCanvas = document.createElement("canvas");
-          extractCanvas.width = width;
-          extractCanvas.height = height;
+          extractCanvas.width = extractSize;
+          extractCanvas.height = extractSize;
           const extCtx = extractCanvas.getContext("2d")!;
-          extCtx.drawImage(resultFullImg, left, top, width, height, 0, 0, width, height);
+          extCtx.imageSmoothingEnabled = false;
+          extCtx.drawImage(resultFullImg, srcX, srcY, extractSize, extractSize, 0, 0, extractSize, extractSize);
           const extractedB64 = extractCanvas.toDataURL("image/png").replace(/^data:image\/\w+;base64,/, "");
 
           disableCropMode(canvas);
@@ -288,8 +320,8 @@ export default function ImageEditorPage() {
           const guideRect = new Rect({
             left,
             top,
-            width,
-            height,
+            width: size,
+            height: size,
             fill: "rgba(139, 92, 246, 0.1)",
             stroke: "#8b5cf6",
             strokeWidth: 1,
@@ -306,8 +338,8 @@ export default function ImageEditorPage() {
             genImg.set({
               left,
               top,
-              scaleX: width / (genImg.width || 1),
-              scaleY: height / (genImg.height || 1),
+              scaleX: size / (genImg.width || 1),
+              scaleY: size / (genImg.height || 1),
               name: "region-result",
             });
             canvas.add(genImg);

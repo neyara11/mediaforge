@@ -118,12 +118,13 @@ export function enableCropMode(canvas: FabricCanvas): void {
   const onMouseMove = (opt: any) => {
     if (!state.isDrawing || !state.cropRect) return;
     const p = opt.scenePoint;
-    const left = Math.min(state.startX, p.x);
-    const top = Math.min(state.startY, p.y);
-    const width = Math.abs(p.x - state.startX);
-    const height = Math.abs(p.y - state.startY);
+    const dx = Math.abs(p.x - state.startX);
+    const dy = Math.abs(p.y - state.startY);
+    const size = Math.max(dx, dy);
+    const left = p.x > state.startX ? state.startX : state.startX - size;
+    const top = p.y > state.startY ? state.startY : state.startY - size;
 
-    state.cropRect.set({ left, top, width, height });
+    state.cropRect.set({ left, top, width: size, height: size });
     canvas.renderAll();
   };
 

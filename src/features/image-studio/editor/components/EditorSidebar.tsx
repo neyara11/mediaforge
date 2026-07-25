@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { SlidersHorizontal, Wand2, Layers } from "lucide-react";
 import type { Canvas as FabricCanvas } from "fabric";
 import { cn } from "../../../../shared/utils";
@@ -11,6 +12,7 @@ interface EditorSidebarProps {
   canvas: FabricCanvas | null;
   filters: FilterState;
   onFilterChange: (key: string, value: number) => void;
+  onFilterReset: () => void;
   onApplyAI: (type: string, params: Record<string, unknown>) => Promise<void>;
   loading: boolean;
   defaultModel: string;
@@ -20,22 +22,24 @@ interface EditorSidebarProps {
 
 type TabId = "filters" | "ai" | "layers";
 
-const tabs: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { id: "filters", label: "Filters", icon: SlidersHorizontal },
-  { id: "ai", label: "AI Tools", icon: Wand2 },
-  { id: "layers", label: "Layers", icon: Layers },
+const tabs: { id: TabId; labelKey: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: "filters", labelKey: "sidebar.filters", icon: SlidersHorizontal },
+  { id: "ai", labelKey: "sidebar.ai", icon: Wand2 },
+  { id: "layers", labelKey: "sidebar.layers", icon: Layers },
 ];
 
 export default function EditorSidebar({
   canvas,
   filters,
   onFilterChange,
+  onFilterReset,
   onApplyAI,
   loading,
   defaultModel,
   availableModels,
   onModelChange,
 }: EditorSidebarProps) {
+  const { t } = useTranslation("editor");
   const [activeTab, setActiveTab] = useState<TabId>("filters");
 
   return (
@@ -48,7 +52,7 @@ export default function EditorSidebar({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              title={tab.label}
+              title={t(tab.labelKey)}
               className={cn(
                 "flex flex-1 items-center justify-center gap-2 px-3 py-3 text-xs font-medium transition-colors",
                 isActive
@@ -57,7 +61,7 @@ export default function EditorSidebar({
               )}
             >
               <Icon className="h-4 w-4" />
-              {tab.label}
+              {t(tab.labelKey)}
             </button>
           );
         })}
@@ -68,13 +72,7 @@ export default function EditorSidebar({
           <FilterPanel
             filters={filters}
             onChange={onFilterChange}
-            onReset={() => {
-              onFilterChange("brightness", 0);
-              onFilterChange("contrast", 0);
-              onFilterChange("saturation", 1);
-              onFilterChange("blur", 0);
-              onFilterChange("sharpen", 0);
-            }}
+            onReset={onFilterReset}
           />
         )}
 

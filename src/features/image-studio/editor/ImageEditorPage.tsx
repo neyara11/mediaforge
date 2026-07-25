@@ -1,12 +1,13 @@
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useState, useCallback, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { Point, Rect, FabricImage } from "fabric";
 import { FolderOpen } from "lucide-react";
 import { getGenerations } from "../../../db";
-import { canvasToBase64, extractMaskFromCanvas, createFullMask, compositeMaskOverlay, loadImageElement } from "./utils/canvasExport";
-import { resetFilters } from "./utils/filterApply";
+import { canvasToBase64, extractMaskFromCanvas, createFullMask, compositeMaskOverlay, loadImageElement, getNativeResolutionMultiplier } from "./utils/canvasExport";
+import { resetFilters, applyFiltersToObject } from "./utils/filterApply";
 import type { FilterState } from "./utils/filterApply";
 import { useFabricCanvas } from "./hooks/useFabricCanvas";
 import { useEditorHistory } from "./hooks/useEditorHistory";
@@ -25,7 +26,32 @@ import { enableCropMode, disableCropMode, getCropRect } from "./tools/cropTool";
 import { enableLasso, disableLasso } from "./tools/lassoTool";
 import { enableMaskMode, disableMaskMode, getMaskObjects, clearMask } from "./tools/maskTool";
 
+/** Human-readable text for any thrown value (Error, string, DOM Event...). */
+function errorText(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  try {
+    return JSON.stringify(e);
+  } catch {
+    return String(e);
+  }
+}
+
+/** Ignore key events originating from text inputs / editable elements. */
+function isEditableTarget(e: KeyboardEvent): boolean {
+  const t = e.target as HTMLElement | null;
+  if (!t) return false;
+  const tag = t.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    t.isContentEditable === true
+  );
+}
+
 export default function ImageEditorPage() {
+  const { t } = useTranslation("editor");
   const { genId } = useParams<{ genId: string }>();
   const {
     canvasRef,
@@ -40,6 +66,10 @@ export default function ImageEditorPage() {
   const { tool, setTool, settings, updateSetting, tools: toolsList } = useEditorTools();
   const { defaultModel, setDefaultModel, availableModels } = useDefaultModel("image");
 
+  // Batch image index passed from the studio page (multi-image generations)
+  const [searchParams] = useSearchParams();
+  const imageIndex = Math.max(0, Number(searchParams.get("idx")) || 0);
+
   const [filters, setFilters] = useState<FilterState>(resetFilters());
   const [showSidebar, setShowSidebar] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
@@ -48,7 +78,14 @@ export default function ImageEditorPage() {
   const [cursorX, setCursorX] = useState(0);
   const [cursorY, setCursorY] = useState(0);
 
-  const currentZoom = useRef(1);
+  const [zoom, setZoomState] = useState(1);
+
+  // Keep settings in a ref so tool (re)activation doesn't depend on them —
+  // changing a slider must not tear down an in-progress crop/lasso selection.
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   const deactivateCurrentTool = useCallback(() => {
     if (!canvas) return;
@@ -66,6 +103,7 @@ export default function ImageEditorPage() {
   const activateTool = useCallback(
     (newTool: EditorTool) => {
       if (!canvas) return;
+      const s = settingsRef.current;
       deactivateCurrentTool();
 
       switch (newTool) {
@@ -75,43 +113,48 @@ export default function ImageEditorPage() {
           break;
         case "brush":
           canvas.selection = false;
-          enableBrush(canvas, settings.brushSize, settings.brushColor);
+          enableBrush(canvas, s.brushSize, s.brushColor);
           break;
         case "eraser":
           canvas.selection = false;
-          enableEraser(canvas, settings.brushSize);
+          enableEraser(canvas, s.brushSize);
           break;
         case "text":
           canvas.selection = false;
-          enableTextTool(canvas);
+          enableTextTool(canvas, {
+            fontSize: s.fontSize,
+            fontFamily: s.fontFamily,
+            fill: s.brushColor,
+            text: t("editor.textDefault"),
+          });
           break;
         case "rect":
           canvas.selection = false;
-          enableShapeTool(canvas, "rect", settings.fillColor, settings.strokeColor, settings.strokeWidth);
+          enableShapeTool(canvas, "rect", s.fillColor, s.strokeColor, s.strokeWidth);
           break;
         case "ellipse":
           canvas.selection = false;
-          enableShapeTool(canvas, "ellipse", settings.fillColor, settings.strokeColor, settings.strokeWidth);
+          enableShapeTool(canvas, "ellipse", s.fillColor, s.strokeColor, s.strokeWidth);
           break;
         case "line":
           canvas.selection = false;
-          enableShapeTool(canvas, "line", "transparent", settings.strokeColor, settings.strokeWidth);
+          enableShapeTool(canvas, "line", "transparent", s.strokeColor, s.strokeWidth);
           break;
         case "crop":
           canvas.selection = false;
-          enableCropMode(canvas);
+          enableCropMode(canvas, () => setTool("select"));
           break;
         case "lasso":
           canvas.selection = false;
-          enableLasso(canvas, async (_selection: any) => {});
+          enableLasso(canvas, () => {});
           break;
         case "mask":
           canvas.selection = false;
-          enableMaskMode(canvas, settings.brushSize);
+          enableMaskMode(canvas, s.brushSize);
           break;
       }
     },
-    [canvas, settings, deactivateCurrentTool],
+    [canvas, deactivateCurrentTool, setTool, t],
   );
 
   useEffect(() => {
@@ -141,17 +184,22 @@ export default function ImageEditorPage() {
     canvas.on("object:modified", pushState);
     canvas.on("object:added", pushState);
     canvas.on("object:removed", pushState);
+    // Bulk operations (crop etc.) request a single history entry explicitly
+    canvas.on("history:push" as any, pushState);
 
-    canvas.on("mouse:move", (opt: any) => {
+    const onMouseMove = (opt: any) => {
       const pointer = canvas.getPointer(opt.e);
       setCursorX(Math.round(pointer.x));
       setCursorY(Math.round(pointer.y));
-    });
+    };
+    canvas.on("mouse:move", onMouseMove);
 
     return () => {
       canvas.off("object:modified", pushState);
       canvas.off("object:added", pushState);
       canvas.off("object:removed", pushState);
+      canvas.off("history:push" as any, pushState);
+      canvas.off("mouse:move", onMouseMove);
     };
   }, [canvas, isReady, pushState]);
 
@@ -161,11 +209,11 @@ export default function ImageEditorPage() {
       if (opt.e.ctrlKey) {
         opt.e.preventDefault();
         const delta = opt.e.deltaY;
-        let zoom = canvas.getZoom();
-        zoom *= 0.999 ** delta;
-        zoom = Math.min(Math.max(zoom, 0.1), 20);
-        canvas.zoomToPoint(new Point(opt.e.offsetX, opt.e.offsetY), zoom);
-        currentZoom.current = zoom;
+        let newZoom = canvas.getZoom();
+        newZoom *= 0.999 ** delta;
+        newZoom = Math.min(Math.max(newZoom, 0.1), 10);
+        canvas.zoomToPoint(new Point(opt.e.offsetX, opt.e.offsetY), newZoom);
+        setZoomState(newZoom);
       }
     };
     canvas.on("mouse:wheel", onWheel);
@@ -177,19 +225,65 @@ export default function ImageEditorPage() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!canvas) return;
+      if (isEditableTarget(e)) return;
       if (e.key === "Delete" || e.key === "Backspace") {
-        const active = canvas.getActiveObject();
-        if (active) {
-          canvas.remove(active);
-          canvas.discardActiveObject();
-          canvas.renderAll();
-          pushState();
-        }
+        const active = canvas.getActiveObject() as any;
+        // Don't delete a text object while the user is editing its content
+        if (!active || active.isEditing === true) return;
+        canvas.remove(active);
+        canvas.discardActiveObject();
+        canvas.renderAll();
+        pushState();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [canvas, pushState]);
+
+  // Tool / edit shortcuts advertised in the toolbar tooltips
+  useEffect(() => {
+    const TOOL_KEYS: Record<string, EditorTool> = {
+      v: "select",
+      c: "crop",
+      b: "brush",
+      e: "eraser",
+      t: "text",
+      r: "rect",
+      o: "ellipse",
+      i: "line",
+      l: "lasso",
+      m: "mask",
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isEditableTarget(e)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+
+      if (mod && key === "s") {
+        e.preventDefault();
+        handleSave();
+        return;
+      }
+      if (mod && key === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (mod && key === "y") {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (mod || e.altKey) return;
+
+      const mapped = TOOL_KEYS[key];
+      if (mapped) setTool(mapped);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setTool, undo, redo]);
 
   useEffect(() => {
     if (!genId) return;
@@ -199,33 +293,64 @@ export default function ImageEditorPage() {
         const gens = await getGenerations(undefined, "/v1/images");
         const gen = gens.find((g) => g.id === genId && g.status === "completed" && g.responseJson);
         if (!gen?.responseJson) {
-          setError("Изображение не найдено");
+          setError(t("editor.notFound"));
           setLoading(false);
           return;
         }
         const parsed = JSON.parse(gen.responseJson);
-        const b64 = parsed?.data?.[0]?.b64_json;
+        const images = Array.isArray(parsed?.data) ? parsed.data : [];
+        const b64 = images[Math.min(imageIndex, images.length - 1)]?.b64_json;
         if (b64) {
           await loadImage(b64);
           setImageLoaded(true);
           clearHistory();
           setTimeout(() => pushState(), 100);
         } else {
-          setError("Не удалось загрузить изображение");
+          setError(t("editor.loadFailed"));
         }
       } catch {
-        setError("Ошибка загрузки из базы данных");
+        setError(t("editor.dbError"));
       }
       setLoading(false);
     })();
-  }, [genId, loadImage, pushState, clearHistory]);
+  }, [genId, imageIndex, loadImage, pushState, clearHistory, t]);
+
+  /** The image object filters apply to: active image, else the background image. */
+  const getFilterTarget = useCallback(() => {
+    if (!canvas) return null;
+    const active = canvas.getActiveObject() as any;
+    if (active && active.type === "image") return active;
+    return (
+      (canvas.getObjects().find(
+        (obj: any) => obj.type === "image" && obj.selectable === false && obj.evented === false,
+      ) as any) ?? null
+    );
+  }, [canvas]);
 
   const handleFilterChange = useCallback(
     (key: string, value: number) => {
-      setFilters((prev) => ({ ...prev, [key]: value }));
+      setFilters((prev) => {
+        const next = { ...prev, [key]: value };
+        const target = getFilterTarget();
+        if (target && canvas) {
+          applyFiltersToObject(target, next);
+          canvas.requestRenderAll();
+        }
+        return next;
+      });
     },
-    [],
+    [canvas, getFilterTarget],
   );
+
+  const handleFilterReset = useCallback(() => {
+    const next = resetFilters();
+    setFilters(next);
+    const target = getFilterTarget();
+    if (target && canvas) {
+      applyFiltersToObject(target, next);
+      canvas.requestRenderAll();
+    }
+  }, [canvas, getFilterTarget]);
 
   const handleApplyAI = useCallback(
     async (type: string, params: Record<string, unknown>) => {
@@ -237,13 +362,13 @@ export default function ImageEditorPage() {
         if (type === "region_edit") {
           const cropRect = getCropRect(canvas);
           if (!cropRect) {
-            setError("Сначала выделите область инструментом Crop");
+            setError(t("editor.selectRegionFirst"));
             setLoading(false);
             return;
           }
           let { left, top, width, height } = cropRect;
           if (width < 4 || height < 4) {
-            setError("Область слишком мала");
+            setError(t("editor.regionTooSmall"));
             setLoading(false);
             return;
           }
@@ -263,7 +388,7 @@ export default function ImageEditorPage() {
           }
           const size = Math.min(width, height);
           if (size < 4) {
-            setError("Выделенная область за пределами изображения");
+            setError(t("editor.regionOutside"));
             setLoading(false);
             return;
           }
@@ -351,7 +476,7 @@ export default function ImageEditorPage() {
         } else if (type === "inpaint") {
           const maskObjects = getMaskObjects(canvas);
           if (maskObjects.length === 0) {
-            setError("Сначала закрасьте область для inpainting (инструмент Mask)");
+            setError(t("editor.maskFirst"));
             setLoading(false);
             return;
           }
@@ -359,7 +484,7 @@ export default function ImageEditorPage() {
           // Extract mask BEFORE hiding objects
           const maskData = await extractMaskFromCanvas(canvas, maskObjects);
           if (!maskData) {
-            setError("Не удалось извлечь маску");
+            setError(t("editor.maskExtractFailed"));
             setLoading(false);
             return;
           }
@@ -375,7 +500,7 @@ export default function ImageEditorPage() {
 
           const result = await invoke<string>("inpaint_image", {
             imageB64: overlayedB64,
-            maskB64: "",
+            maskB64: maskData.alphaB64,
             prompt: prompt || "Regenerate only the green-highlighted areas. Keep everything else exactly the same. Blend seamlessly.",
             model: defaultModel,
           });
@@ -392,7 +517,7 @@ export default function ImageEditorPage() {
             setError("API: " + (parsed?.error?.message || result.substring(0, 200)));
           }
         } else if (type === "outpaint") {
-          const imageB64 = canvasToBase64(canvas);
+          const imageB64 = canvasToBase64(canvas, "png", 1, getNativeResolutionMultiplier(canvas));
           const result = await invoke<string>("generative_expand", {
             imageB64,
             direction: "all",
@@ -407,10 +532,10 @@ export default function ImageEditorPage() {
             pushState();
           }
         } else if (type === "upscale") {
-          const imageB64 = canvasToBase64(canvas);
+          const imageB64 = canvasToBase64(canvas, "png", 1, getNativeResolutionMultiplier(canvas));
           const result = await invoke<string>("enhance_image", {
             imageB64,
-            scale: 2,
+            scale: 4,
             model: defaultModel,
           });
           const parsed = JSON.parse(result);
@@ -420,10 +545,10 @@ export default function ImageEditorPage() {
             pushState();
           }
         } else if (type === "style_transfer") {
-          const imageB64 = canvasToBase64(canvas);
+          const imageB64 = canvasToBase64(canvas, "png", 1, getNativeResolutionMultiplier(canvas));
           const styleRefB64 = (params.styleRef as string) || "";
           if (!styleRefB64) {
-            setError("Выберите референс стиля");
+            setError(t("editor.styleRefRequired"));
             setLoading(false);
             return;
           }
@@ -439,8 +564,9 @@ export default function ImageEditorPage() {
             pushState();
           }
         } else if (type === "remove_background") {
-          const imageB64 = canvasToBase64(canvas);
-          const fullMask = createFullMask(canvas);
+          const multiplier = getNativeResolutionMultiplier(canvas);
+          const imageB64 = canvasToBase64(canvas, "png", 1, multiplier);
+          const fullMask = createFullMask(canvas, multiplier);
           const result = await invoke<string>("inpaint_image", {
             imageB64,
             maskB64: fullMask,
@@ -455,11 +581,11 @@ export default function ImageEditorPage() {
           }
         }
       } catch (e) {
-        setError(`AI операция не удалась: ${e}`);
+        setError(t("editor.aiFailed", { error: errorText(e) }));
       }
       setLoading(false);
     },
-    [canvas, loadImage, pushState, defaultModel],
+    [canvas, loadImage, pushState, defaultModel, setTool, t],
   );
 
   const handleExport = useCallback(async () => {
@@ -474,9 +600,9 @@ export default function ImageEditorPage() {
         await invoke("save_base64_file", { base64Data: b64, filePath });
       }
     } catch {
-      setError("Не удалось экспортировать изображение");
+      setError(t("editor.exportFailed"));
     }
-  }, [canvas]);
+  }, [canvas, t]);
 
   const handleSave = useCallback(async () => {
     if (!canvas) return;
@@ -501,9 +627,9 @@ export default function ImageEditorPage() {
         await invoke("save_base64_file", { base64Data: b64, filePath });
       }
     } catch {
-      setError("Не удалось сохранить проект");
+      setError(t("editor.saveFailed"));
     }
-  }, [canvas, filters]);
+  }, [canvas, filters, t]);
 
   const handleOpen = useCallback(async () => {
     try {
@@ -520,10 +646,10 @@ export default function ImageEditorPage() {
       setTimeout(() => pushState(), 100);
     } catch (e) {
       console.error("Open failed:", e);
-      setError("Не удалось открыть файл: " + String(e));
+      setError(t("editor.openFailed", { error: errorText(e) }));
     }
     setLoading(false);
-  }, [loadImage, pushState, clearHistory]);
+  }, [loadImage, pushState, clearHistory, t]);
 
   const handleToolChange = useCallback(
     (newTool: EditorTool) => {
@@ -550,16 +676,19 @@ export default function ImageEditorPage() {
         onZoomIn={() => {
           const z = Math.min(getZoom() * 1.2, 10);
           setCanvasZoom(z);
-          currentZoom.current = z;
+          setZoomState(z);
         }}
         onZoomOut={() => {
           const z = Math.max(getZoom() * 0.8, 0.1);
           setCanvasZoom(z);
-          currentZoom.current = z;
+          setZoomState(z);
         }}
-        onFitScreen={fitToScreen}
+        onFitScreen={() => {
+          fitToScreen();
+          setZoomState(1);
+        }}
         onToggleSidebar={() => setShowSidebar((v) => !v)}
-        zoom={currentZoom.current || getZoom()}
+        zoom={zoom}
         showSidebar={showSidebar}
       />
 
@@ -586,12 +715,12 @@ export default function ImageEditorPage() {
           {!genId && !imageLoaded && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-zinc-600">
               <FolderOpen className="h-12 w-12 opacity-50" />
-              <p className="text-sm">Выберите изображение для редактирования</p>
+              <p className="text-sm">{t("editor.chooseImage")}</p>
               <button
                 onClick={handleOpen}
                 className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 transition-colors hover:border-violet-500"
               >
-                Открыть изображение
+                {t("editor.openImage")}
               </button>
             </div>
           )}
@@ -607,6 +736,7 @@ export default function ImageEditorPage() {
             canvas={canvas}
             filters={filters}
             onFilterChange={handleFilterChange}
+            onFilterReset={handleFilterReset}
             onApplyAI={handleApplyAI}
             loading={loading}
             defaultModel={defaultModel}
@@ -617,7 +747,7 @@ export default function ImageEditorPage() {
       </div>
 
       <EditorStatusBar
-        zoom={getZoom()}
+        zoom={zoom}
         canvasWidth={canvas?.getWidth() ?? 800}
         canvasHeight={canvas?.getHeight() ?? 600}
         cursorX={cursorX}

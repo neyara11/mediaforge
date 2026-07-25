@@ -8,6 +8,11 @@ use tauri::State;
 
 use crate::api::client::{api_post, ApiState};
 
+/// Truncate a string to at most `max` characters (UTF-8 safe).
+fn truncate_chars(s: &str, max: usize) -> String {
+    s.chars().take(max).collect()
+}
+
 fn encode_png(img: &DynamicImage) -> Result<String, String> {
     let mut buf = Cursor::new(Vec::new());
     img.write_to(&mut buf, ImageFormat::Png)
@@ -76,14 +81,19 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
 
 #[tauri::command]
 pub async fn load_image_from_path(path: String) -> Result<String, String> {
-    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
-    match image::ImageReader::open(&path) {
-        Ok(reader) => match reader.with_guessed_format().map_err(|e| e.to_string())?.decode() {
-            Ok(img) => encode_png(&img),
+    // Blocking IO + decode off the async runtime
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+        match image::ImageReader::open(&path) {
+            Ok(reader) => match reader.with_guessed_format().map_err(|e| e.to_string())?.decode() {
+                Ok(img) => encode_png(&img),
+                Err(_) => Ok(base64::engine::general_purpose::STANDARD.encode(&bytes)),
+            },
             Err(_) => Ok(base64::engine::general_purpose::STANDARD.encode(&bytes)),
-        },
-        Err(_) => Ok(base64::engine::general_purpose::STANDARD.encode(&bytes)),
-    }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -92,37 +102,43 @@ pub async fn apply_native_filter(
     filter_type: String,
     value: f32,
 ) -> Result<String, String> {
-    let mut img = decode_b64(&b64)?;
+    // Per-pixel work can take seconds on multi-megapixel images — keep it
+    // off the tokio runtime so other commands stay responsive.
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut img = decode_b64(&b64)?;
 
-    match filter_type.as_str() {
-        "brightness" => {
-            img = img.brighten(value as i32);
-        }
-        "contrast" => {
-            img = img.adjust_contrast(value);
-        }
-        "blur" => {
-            img = DynamicImage::ImageRgba8(image::imageops::blur(&img, value));
-        }
-        "sharpen" => {
-            img = DynamicImage::ImageRgba8(image::imageops::unsharpen(&img, value, 0));
-        }
-        "saturation" => {
-            let mut rgba: RgbaImage = img.to_rgba8();
-            for pixel in rgba.pixels_mut() {
-                let (h, s, v) = rgb_to_hsv(pixel[0], pixel[1], pixel[2]);
-                let new_s = (s * value).clamp(0.0, 1.0);
-                let (r, g, b) = hsv_to_rgb(h, new_s, v);
-                pixel[0] = r;
-                pixel[1] = g;
-                pixel[2] = b;
+        match filter_type.as_str() {
+            "brightness" => {
+                img = img.brighten(value as i32);
             }
-            img = DynamicImage::ImageRgba8(rgba);
+            "contrast" => {
+                img = img.adjust_contrast(value);
+            }
+            "blur" => {
+                img = DynamicImage::ImageRgba8(image::imageops::blur(&img, value));
+            }
+            "sharpen" => {
+                img = DynamicImage::ImageRgba8(image::imageops::unsharpen(&img, value, 0));
+            }
+            "saturation" => {
+                let mut rgba: RgbaImage = img.to_rgba8();
+                for pixel in rgba.pixels_mut() {
+                    let (h, s, v) = rgb_to_hsv(pixel[0], pixel[1], pixel[2]);
+                    let new_s = (s * value).clamp(0.0, 1.0);
+                    let (r, g, b) = hsv_to_rgb(h, new_s, v);
+                    pixel[0] = r;
+                    pixel[1] = g;
+                    pixel[2] = b;
+                }
+                img = DynamicImage::ImageRgba8(rgba);
+            }
+            _ => return Err(format!("Unknown filter type: {}", filter_type)),
         }
-        _ => return Err(format!("Unknown filter type: {}", filter_type)),
-    }
 
-    encode_png(&img)
+        encode_png(&img)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -146,10 +162,10 @@ pub async fn inpaint_image(
         "response_format": "b64_json"
     });
     let body_str = body.to_string();
-    eprintln!("[inpaint_image] POST /images refs={} body: {}", refs.len(), &body_str[..body_str.len().min(200)]);
+    eprintln!("[inpaint_image] POST /images refs={} body: {}", refs.len(), truncate_chars(&body_str, 200));
     let result = api_post(&state, "/images", &body_str).await;
     match &result {
-        Ok(text) => eprintln!("[inpaint_image] response (first 200 chars): {}", &text[..text.len().min(200)]),
+        Ok(text) => eprintln!("[inpaint_image] response (first 200 chars): {}", truncate_chars(text, 200)),
         Err(e) => eprintln!("[inpaint_image] error: {}", e),
     }
     result
@@ -228,10 +244,11 @@ pub async fn edit_region(
         ],
         "response_format": "b64_json"
     });
-    eprintln!("[edit_region] POST /images body: {}", &body.to_string()[..body.to_string().len().min(200)]);
-    let result = api_post(&state, "/images", &body.to_string()).await;
+    let body_str = body.to_string();
+    eprintln!("[edit_region] POST /images body: {}", truncate_chars(&body_str, 200));
+    let result = api_post(&state, "/images", &body_str).await;
     match &result {
-        Ok(text) => eprintln!("[edit_region] response (first 200 chars): {}", &text[..text.len().min(200)]),
+        Ok(text) => eprintln!("[edit_region] response (first 200 chars): {}", truncate_chars(text, 200)),
         Err(e) => eprintln!("[edit_region] error: {}", e),
     }
     result
@@ -254,29 +271,33 @@ pub async fn export_canvas_image(
     quality: u8,
     file_path: String,
 ) -> Result<(), String> {
-    let img = decode_b64(&b64)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let img = decode_b64(&b64)?;
 
-    match format.as_str() {
-        "png" => {
-            let mut file = fs::File::create(&file_path).map_err(|e| e.to_string())?;
-            img.write_to(&mut file, ImageFormat::Png)
-                .map_err(|e| e.to_string())?;
+        match format.as_str() {
+            "png" => {
+                let mut file = fs::File::create(&file_path).map_err(|e| e.to_string())?;
+                img.write_to(&mut file, ImageFormat::Png)
+                    .map_err(|e| e.to_string())?;
+            }
+            "jpeg" => {
+                let mut buf = Cursor::new(Vec::new());
+                let encoder =
+                    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality);
+                img.write_with_encoder(encoder)
+                    .map_err(|e| e.to_string())?;
+                fs::write(&file_path, buf.into_inner()).map_err(|e| e.to_string())?;
+            }
+            "webp" => {
+                let mut file = fs::File::create(&file_path).map_err(|e| e.to_string())?;
+                img.write_to(&mut file, ImageFormat::WebP)
+                    .map_err(|e| e.to_string())?;
+            }
+            _ => return Err(format!("Unsupported export format: {}", format)),
         }
-        "jpeg" => {
-            let mut buf = Cursor::new(Vec::new());
-            let encoder =
-                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality);
-            img.write_with_encoder(encoder)
-                .map_err(|e| e.to_string())?;
-            fs::write(&file_path, buf.into_inner()).map_err(|e| e.to_string())?;
-        }
-        "webp" => {
-            let mut file = fs::File::create(&file_path).map_err(|e| e.to_string())?;
-            img.write_to(&mut file, ImageFormat::WebP)
-                .map_err(|e| e.to_string())?;
-        }
-        _ => return Err(format!("Unsupported export format: {}", format)),
-    }
 
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

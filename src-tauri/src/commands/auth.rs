@@ -19,9 +19,28 @@ pub async fn set_api_key(
     store.set("api_key", serde_json::json!(key));
     store.save().map_err(|e| e.to_string())?;
 
-    if let Ok(mut guard) = state.api_key.write() {
-        *guard = Some(key);
-    }
+    let mut guard = state
+        .api_key
+        .write()
+        .map_err(|e| format!("API key lock poisoned: {}", e))?;
+    *guard = Some(key);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_api_key(
+    app: tauri::AppHandle,
+    state: State<'_, ApiState>,
+) -> Result<(), String> {
+    let store = app.store("settings.json").map_err(|e| e.to_string())?;
+    store.delete("api_key");
+    store.save().map_err(|e| e.to_string())?;
+
+    let mut guard = state
+        .api_key
+        .write()
+        .map_err(|e| format!("API key lock poisoned: {}", e))?;
+    *guard = None;
     Ok(())
 }
 

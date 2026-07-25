@@ -49,6 +49,7 @@ export default function ModelCatalog() {
   const { t } = useTranslation("models");
   const [models, setModels] = useState<RouterAIModel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [modalityFilter, setModalityFilter] = useState<ModalityFilter>("all");
   const [sortField, setSortField] = useState<SortField>("price");
@@ -62,14 +63,14 @@ export default function ModelCatalog() {
 
   const loadModels = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const result = await fetchModels();
       const parsed = JSON.parse(result);
       const data = parsed?.data ?? [];
-      console.debug("[ModelCatalog] loaded", data.length, "models, sample ids:", data.slice(0, 5).map((m: RouterAIModel) => m.id));
       setModels(data);
-    } catch {
-      // no-op
+    } catch (e) {
+      setLoadError(String(e));
     }
     setLoading(false);
   };
@@ -254,7 +255,21 @@ export default function ModelCatalog() {
                 {filteredModels.length === 0 && (
                   <tr>
                     <td colSpan={5} className="px-3 py-8 text-center text-zinc-600">
-                      {loading ? t("loading") : t("noModels")}
+                      {loading ? (
+                        t("loading")
+                      ) : loadError ? (
+                        <span className="flex flex-col items-center gap-2">
+                          <span className="text-red-400">{loadError}</span>
+                          <button
+                            onClick={loadModels}
+                            className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-400 transition-colors hover:border-violet-500 hover:text-violet-400"
+                          >
+                            {t("retry", { defaultValue: "Повторить" })}
+                          </button>
+                        </span>
+                      ) : (
+                        t("noModels")
+                      )}
                     </td>
                   </tr>
                 )}

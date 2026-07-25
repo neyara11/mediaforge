@@ -3,6 +3,21 @@ import {
   Rect,
   FabricImage,
 } from "fabric";
+import { canvasToElementUntransformed } from "../utils/canvasExport";
+import { suspendHistory, resumeHistory } from "../utils/historySuspend";
+
+/** Ignore key events originating from text inputs / editable elements. */
+function isEditableTarget(e: KeyboardEvent): boolean {
+  const t = e.target as HTMLElement | null;
+  if (!t) return false;
+  const tag = t.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    t.isContentEditable === true
+  );
+}
 
 export interface CropRect {
   left: number;
@@ -54,7 +69,7 @@ function confirmCrop(canvas: FabricCanvas): void {
 
   if (width < 2 || height < 2) return;
 
-  const el = canvas.toCanvasElement();
+  const el = canvasToElementUntransformed(canvas);
   const offscreen = document.createElement("canvas");
   offscreen.width = width;
   offscreen.height = height;
@@ -63,28 +78,52 @@ function confirmCrop(canvas: FabricCanvas): void {
 
   const dataUrl = offscreen.toDataURL("image/png");
 
-  FabricImage.fromURL(dataUrl).then((img) => {
-    canvas.clear();
-    canvas.setDimensions({ width, height });
-    canvas.add(img);
-    img.set({ left: 0, top: 0 });
-    canvas.renderAll();
-    disableCropMode(canvas);
-  });
+  FabricImage.fromURL(dataUrl)
+    .then((img) => {
+      if (canvas.destroyed) return;
+      suspendHistory(canvas);
+      try {
+        canvas.clear();
+        canvas.setDimensions({ width, height });
+        canvas.add(img);
+        img.set({ left: 0, top: 0 });
+        canvas.renderAll();
+      } finally {
+        resumeHistory(canvas);
+      }
+      canvas.fire("history:push" as any);
+      exitCropMode(canvas);
+    })
+    .catch((err) => {
+      console.error("[crop] failed to load cropped image:", err);
+      if (!canvas.destroyed) exitCropMode(canvas);
+    });
+}
+
+/** Disable crop mode and notify the host (e.g. to reset the toolbar tool). */
+function exitCropMode(canvas: FabricCanvas): void {
+  const onExit = (canvas as any).__cropOnExit as (() => void) | undefined;
+  disableCropMode(canvas);
+  if (onExit) onExit();
 }
 
 function makeKeyHandler(canvas: FabricCanvas): (e: KeyboardEvent) => void {
   return (e: KeyboardEvent) => {
+    if (isEditableTarget(e)) return;
     if (e.key === "Enter") {
       confirmCrop(canvas);
     }
     if (e.key === "Escape") {
-      disableCropMode(canvas);
+      exitCropMode(canvas);
     }
   };
 }
 
-export function enableCropMode(canvas: FabricCanvas): void {
+export function enableCropMode(
+  canvas: FabricCanvas,
+  onExit?: () => void,
+): void {
+  (canvas as any).__cropOnExit = onExit;
   canvas.isDrawingMode = false;
   canvas.selection = false;
   canvas.skipTargetFind = true;
@@ -111,7 +150,12 @@ export function enableCropMode(canvas: FabricCanvas): void {
       selectable: false,
       evented: false,
     });
-    canvas.add(state.cropRect);
+    suspendHistory(canvas);
+    try {
+      canvas.add(state.cropRect);
+    } finally {
+      resumeHistory(canvas);
+    }
     canvas.renderAll();
   };
 
@@ -133,7 +177,12 @@ export function enableCropMode(canvas: FabricCanvas): void {
       const w = state.cropRect.width! * Math.abs(state.cropRect.scaleX!);
       const h = state.cropRect.height! * Math.abs(state.cropRect.scaleY!);
       if (w < 2 || h < 2) {
-        canvas.remove(state.cropRect);
+        suspendHistory(canvas);
+        try {
+          canvas.remove(state.cropRect);
+        } finally {
+          resumeHistory(canvas);
+        }
         state.cropRect = null;
       }
     }
@@ -167,7 +216,12 @@ export function enableCropMode(canvas: FabricCanvas): void {
 export function disableCropMode(canvas: FabricCanvas): void {
   const state = getState(canvas);
   if (state.cropRect) {
-    canvas.remove(state.cropRect);
+    suspendHistory(canvas);
+    try {
+      canvas.remove(state.cropRect);
+    } finally {
+      resumeHistory(canvas);
+    }
     state.cropRect = null;
   }
   state.isDrawing = false;
@@ -183,6 +237,7 @@ export function disableCropMode(canvas: FabricCanvas): void {
     }
     delete (canvas as any).__cropHandlers;
   }
+  delete (canvas as any).__cropOnExit;
 
   canvas.selection = true;
   canvas.skipTargetFind = false;

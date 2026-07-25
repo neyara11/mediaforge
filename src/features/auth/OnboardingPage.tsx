@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, CheckCircle, XCircle, Key, Box, Monitor, Zap } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useAuth } from "../auth/AuthContext";
 import { fetchModels } from "../../api/endpoints/models";
 import { setSetting } from "../../db";
@@ -47,7 +48,8 @@ export default function OnboardingPage() {
   const goNext = () => {
     const nextIdx = stepIndex + 1;
     if (nextIdx < STEPS.length) {
-      if (step === "models") handleModelsLoad();
+      // Load models when *entering* the models step so the count is visible
+      if (STEPS[nextIdx] === "models") handleModelsLoad();
       setStep(STEPS[nextIdx]);
     } else {
       completeOnboarding();
@@ -104,7 +106,7 @@ export default function OnboardingPage() {
                 className="mb-3 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm text-white placeholder-zinc-500 outline-none focus:border-violet-500"
               />
               <button
-                onClick={() => window.open("https://routerai.ru/settings/keys", "_blank")}
+                onClick={() => openUrl("https://routerai.ru/settings/keys").catch(console.error)}
                 className="mb-4 text-xs text-violet-400 hover:underline"
               >
                 {t("whereToGet")}
@@ -171,7 +173,7 @@ export default function OnboardingPage() {
                 <p className="text-sm text-zinc-300">
                   {modelsLoaded > 0
                     ? t("modelsSummary", { count: modelsLoaded })
-                    : "Загрузка моделей..."}
+                    : t("loadingModels")}
                 </p>
                 <div className="mt-3 space-y-1 text-xs text-zinc-500">
                   <p>{t("modelsImage")}</p>

@@ -1,17 +1,59 @@
 import { Canvas as FabricCanvas, StaticCanvas, FabricImage } from "fabric";
 
+/**
+ * Render the canvas to an element with the viewport transform (zoom/pan)
+ * temporarily reset, so scene coordinates map 1:1 to output pixels.
+ * Uses the plain no-arg toCanvasElement() call — fabric v6 misbehaves when
+ * passed a partial options object here.
+ */
+export function canvasToElementUntransformed(
+  canvas: FabricCanvas,
+): HTMLCanvasElement {
+  const originalVt = [...canvas.viewportTransform] as typeof canvas.viewportTransform;
+  canvas.viewportTransform = [1, 0, 0, 1, 0, 0];
+  try {
+    return canvas.toCanvasElement();
+  } finally {
+    canvas.viewportTransform = originalVt;
+  }
+}
+
 export function canvasToBase64(
   canvas: FabricCanvas,
   format?: string,
   quality?: number,
+  multiplier = 1,
 ): string {
-  const dataUrl = canvas.toDataURL({
-    format: (format ?? "png") as "png" | "jpeg",
-    quality: quality ?? 1,
-    multiplier: 1,
-    enableRetinaScaling: false,
-  });
-  return dataUrl.replace(/^data:image\/\w+;base64,/, "");
+  const originalVt = [...canvas.viewportTransform] as typeof canvas.viewportTransform;
+  canvas.viewportTransform = [1, 0, 0, 1, 0, 0];
+  try {
+    const dataUrl = canvas.toDataURL({
+      format: (format ?? "png") as "png" | "jpeg",
+      quality: quality ?? 1,
+      multiplier,
+      enableRetinaScaling: false,
+    });
+    return dataUrl.replace(/^data:image\/\w+;base64,/, "");
+  } finally {
+    canvas.viewportTransform = originalVt;
+  }
+}
+
+/**
+ * Multiplier that makes the exported bitmap match the background image's
+ * native resolution (the image is downscaled to fit the canvas widget).
+ * Capped to avoid pathologically large exports.
+ */
+export function getNativeResolutionMultiplier(canvas: FabricCanvas): number {
+  const bg = canvas
+    .getObjects()
+    .find(
+      (obj: any) =>
+        obj.type === "image" && obj.selectable === false && obj.evented === false,
+    ) as FabricImage | undefined;
+  const scaleX = bg?.scaleX ?? 1;
+  if (!scaleX || scaleX >= 1) return 1;
+  return Math.min(1 / scaleX, 4);
 }
 
 export async function canvasToBlob(
@@ -33,14 +75,15 @@ export function loadImageElement(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = reject;
+    img.onerror = () =>
+      reject(new Error(`Failed to load image (src length: ${src.length})`));
     img.src = src;
   });
 }
 
-export function createFullMask(canvas: FabricCanvas): string {
-  const width = canvas.getWidth();
-  const height = canvas.getHeight();
+export function createFullMask(canvas: FabricCanvas, multiplier = 1): string {
+  const width = Math.round(canvas.getWidth() * multiplier);
+  const height = Math.round(canvas.getHeight() * multiplier);
   const el = document.createElement("canvas");
   el.width = width;
   el.height = height;
@@ -181,11 +224,8 @@ export async function compositeWithMask(
 
   for (let i = 0; i < rPx.length; i += 4) {
     const alpha = mPx[i + 3];
-    if (alpha > 128) {
-      rPx[i] = rPx[i];
-      rPx[i + 1] = rPx[i + 1];
-      rPx[i + 2] = rPx[i + 2];
-    } else {
+    if (alpha <= 128) {
+      // Outside the mask: keep the original pixel
       rPx[i] = oPx[i];
       rPx[i + 1] = oPx[i + 1];
       rPx[i + 2] = oPx[i + 2];

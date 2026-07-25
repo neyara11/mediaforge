@@ -41,6 +41,7 @@ function AppRoutes() {
         <Route path="/video-studio" element={<VideoStudioPage />} />
         <Route path="/music-studio" element={<MusicStudioPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
   );

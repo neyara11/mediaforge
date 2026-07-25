@@ -28,7 +28,7 @@ interface UseEditorToolsReturn {
   setTool: (tool: EditorTool) => void;
   settings: ToolSettings;
   updateSetting: <K extends keyof ToolSettings>(key: K, value: ToolSettings[K]) => void;
-  tools: { value: EditorTool; label: string; shortcut: string }[];
+  tools: { value: EditorTool; labelKey: string; shortcut: string }[];
 }
 
 const DEFAULT_SETTINGS: ToolSettings = {
@@ -42,17 +42,17 @@ const DEFAULT_SETTINGS: ToolSettings = {
   strokeWidth: 2,
 };
 
-const TOOLS: { value: EditorTool; label: string; shortcut: string }[] = [
-  { value: "select", label: "Выделение", shortcut: "V" },
-  { value: "crop", label: "Кадрировать", shortcut: "C" },
-  { value: "brush", label: "Кисть", shortcut: "B" },
-  { value: "eraser", label: "Ластик", shortcut: "E" },
-  { value: "text", label: "Текст", shortcut: "T" },
-  { value: "rect", label: "Прямоугольник", shortcut: "R" },
-  { value: "ellipse", label: "Эллипс", shortcut: "O" },
-  { value: "line", label: "Линия", shortcut: "I" },
-  { value: "lasso", label: "Лассо", shortcut: "L" },
-  { value: "mask", label: "Маска", shortcut: "M" },
+const TOOLS: { value: EditorTool; labelKey: string; shortcut: string }[] = [
+  { value: "select", labelKey: "tools.select", shortcut: "V" },
+  { value: "crop", labelKey: "tools.crop", shortcut: "C" },
+  { value: "brush", labelKey: "tools.brush", shortcut: "B" },
+  { value: "eraser", labelKey: "tools.eraser", shortcut: "E" },
+  { value: "text", labelKey: "tools.text", shortcut: "T" },
+  { value: "rect", labelKey: "tools.rect", shortcut: "R" },
+  { value: "ellipse", labelKey: "tools.ellipse", shortcut: "O" },
+  { value: "line", labelKey: "tools.line", shortcut: "I" },
+  { value: "lasso", labelKey: "tools.lasso", shortcut: "L" },
+  { value: "mask", labelKey: "tools.mask", shortcut: "M" },
 ];
 
 export function useEditorTools(): UseEditorToolsReturn {

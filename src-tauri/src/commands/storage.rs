@@ -40,18 +40,36 @@ pub async fn save_media(
 
     let filename = format!("{}.{}", uuid::Uuid::new_v4(), extension_for_type(&media_type));
     let path = dir.join(&filename);
-    std::fs::write(&path, &data).map_err(|e| e.to_string())?;
+
+    // `data` is base64 (the convention used everywhere in this app) —
+    // decode before writing, otherwise the saved file is corrupt text.
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data)
+        .map_err(|e| format!("Base64 decode error: {}", e))?;
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
 
     Ok(path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
 pub async fn load_media(
-    _app: AppHandle,
+    app: AppHandle,
     _state: tauri::State<'_, ApiState>,
     path: String,
 ) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+    // Only files inside the app data dir may be read through this command.
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let requested = std::path::Path::new(&path);
+    let canonical = requested
+        .canonicalize()
+        .map_err(|e| format!("Invalid path: {}", e))?;
+    if !canonical.starts_with(&app_dir) {
+        return Err("Access outside the app data directory is not allowed".to_string());
+    }
+    let bytes = std::fs::read(&canonical).map_err(|e| e.to_string())?;
+    use base64::Engine as _;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
 }
 
 #[tauri::command]

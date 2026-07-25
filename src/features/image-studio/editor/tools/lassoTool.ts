@@ -4,6 +4,8 @@ import {
   Polygon,
   Point,
 } from "fabric";
+import { canvasToElementUntransformed } from "../utils/canvasExport";
+import { suspendHistory, resumeHistory } from "../utils/historySuspend";
 
 export interface LassoSelection {
   polygon: Polygon;
@@ -34,7 +36,7 @@ function generateMask(
   const points = polygon.points;
   if (!points || points.length < 3) return null;
 
-  const el = canvas.toCanvasElement();
+  const el = canvasToElementUntransformed(canvas);
   const width = el.width;
   const height = el.height;
 
@@ -92,20 +94,28 @@ export function enableLasso(
     if (state.points.length === 0) return;
     const p = opt.scenePoint;
 
-    if (state.polyline) {
-      canvas.remove(state.polyline);
-    }
-
     const allPoints = [...state.points, new Point(p.x, p.y)];
-    state.polyline = new Polyline(allPoints, {
-      stroke: "#8b5cf6",
-      strokeWidth: 2,
-      strokeDashArray: [5, 5],
-      fill: "",
-      selectable: false,
-      evented: false,
-    });
-    canvas.add(state.polyline);
+    if (state.polyline) {
+      // Update in place — removing/adding per mousemove would flood the
+      // undo history and thrash the object list.
+      state.polyline.set({ points: allPoints });
+      state.polyline.setCoords();
+    } else {
+      state.polyline = new Polyline(allPoints, {
+        stroke: "#8b5cf6",
+        strokeWidth: 2,
+        strokeDashArray: [5, 5],
+        fill: "",
+        selectable: false,
+        evented: false,
+      });
+      suspendHistory(canvas);
+      try {
+        canvas.add(state.polyline);
+      } finally {
+        resumeHistory(canvas);
+      }
+    }
     canvas.requestRenderAll();
   };
 
@@ -146,13 +156,20 @@ function closePolygon(
   state: LassoState,
   onComplete: (selection: LassoSelection) => void,
 ): void {
-  if (state.polyline) {
-    canvas.remove(state.polyline);
-    state.polyline = null;
+  suspendHistory(canvas);
+  try {
+    if (state.polyline) {
+      canvas.remove(state.polyline);
+      state.polyline = null;
+    }
+  } finally {
+    resumeHistory(canvas);
   }
 
   if (state.points.length < 3) return;
 
+  // Build the polygon off-canvas: it only exists to compute the mask.
+  // Leaving it on the canvas would bake a stray overlay into exports.
   const polygon = new Polygon(state.points, {
     fill: "rgba(139, 92, 246, 0.15)",
     stroke: "#8b5cf6",
@@ -162,8 +179,7 @@ function closePolygon(
     evented: false,
   });
 
-  canvas.add(polygon);
-  state.polygon = polygon;
+  state.polygon = null;
   state.points = [];
 
   const maskBase64 = generateMask(polygon, canvas);
@@ -185,9 +201,18 @@ export function disableLasso(canvas: FabricCanvas): void {
 
   const state = (canvas as any).__lassoState;
   if (state) {
-    if (state.polyline) {
-      canvas.remove(state.polyline);
-      state.polyline = null;
+    suspendHistory(canvas);
+    try {
+      if (state.polyline) {
+        canvas.remove(state.polyline);
+        state.polyline = null;
+      }
+      if (state.polygon) {
+        canvas.remove(state.polygon);
+        state.polygon = null;
+      }
+    } finally {
+      resumeHistory(canvas);
     }
     state.points = [];
   }

@@ -9,17 +9,20 @@ import modelsRu from "./locales/ru/models.json";
 import modelsEn from "./locales/en/models.json";
 import settingsRu from "./locales/ru/settings.json";
 import settingsEn from "./locales/en/settings.json";
+import editorRu from "./locales/ru/editor.json";
+import editorEn from "./locales/en/editor.json";
 
 i18n
   .use(LanguageDetector)
   .use(initReactI18next)
   .init({
     resources: {
-      ru: { common: commonRu, onboarding: onboardingRu, models: modelsRu, settings: settingsRu },
-      en: { common: commonEn, onboarding: onboardingEn, models: modelsEn, settings: settingsEn },
+      ru: { common: commonRu, onboarding: onboardingRu, models: modelsRu, settings: settingsRu, editor: editorRu },
+      en: { common: commonEn, onboarding: onboardingEn, models: modelsEn, settings: settingsEn, editor: editorEn },
     },
     fallbackLng: "ru",
     defaultNS: "common",
+    fallbackNS: "common",
     interpolation: {
       escapeValue: false,
     },

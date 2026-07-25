@@ -26,12 +26,90 @@ const DURATION_LABELS: Record<number, string> = { 4: "4s", 8: "8s", 12: "12s" };
 function formatDate(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
-  return d.toLocaleDateString("ru-RU", {
+  return d.toLocaleDateString(undefined, {
     day: "numeric",
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function TaskCard({
+  task,
+  onDelete,
+}: {
+  task: VideoTask;
+  onDelete: (taskId: string) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <div className="flex items-center justify-between">
+        <div className="min-w-0 flex-1">
+          <p className="line-clamp-1 text-sm text-zinc-300">
+            {task.prompt}
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            {task.model}
+            {task.duration && (
+              <span className="ml-2">
+                {DURATION_LABELS[task.duration] ?? `${task.duration}s`}
+              </span>
+            )}
+          </p>
+        </div>
+        <div className="ml-4 flex shrink-0 items-center gap-3">
+          {task.cost != null && (
+            <span className="text-xs text-zinc-500">
+              {formatCostRub(task.cost)}
+            </span>
+          )}
+          <div className="flex items-center gap-2 text-xs text-zinc-500">
+            <Clock className="h-3 w-3" />
+            {task.status === "pending"
+              ? "Queued"
+              : task.status === "processing"
+                ? "Processing..."
+                : task.status === "completed"
+                  ? "Completed"
+                  : "Failed"}
+          </div>
+          <div
+            className={cn(
+              "h-2 w-2 rounded-full",
+              task.status === "completed"
+                ? "bg-emerald-400"
+                : task.status === "failed"
+                  ? "bg-red-400"
+                  : task.status === "processing"
+                    ? "animate-pulse bg-amber-400"
+                    : "bg-zinc-600",
+            )}
+          />
+          <button
+            onClick={() => onDelete(task.id)}
+            title="Delete task"
+            aria-label="Delete task"
+            className="rounded p-1 text-zinc-600 transition-colors hover:text-red-400"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {task.status === "processing" && (
+        <div className="mt-3 h-1 overflow-hidden rounded-full bg-zinc-800">
+          <div className="animate-progress h-full rounded-full bg-violet-500" />
+        </div>
+      )}
+
+      {task.status === "failed" && task.error && (
+        <div className="mt-3 flex items-start gap-2 rounded-lg bg-red-500/10 p-2 text-xs text-red-400">
+          <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>{task.error}</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function VideoStudioPage() {
@@ -40,11 +118,13 @@ export default function VideoStudioPage() {
   const [tasks, setTasks] = useState<VideoTask[]>([]);
   const [showPromptBuilder, setShowPromptBuilder] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [completedExpanded, setCompletedExpanded] = useState(true);
 
   const { defaultModel, setDefaultModel, availableModels } = useDefaultModel("video");
 
   const pollTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const pollErrorsRef = useRef<Map<string, number>>(new Map());
   const videoUrlsRef = useRef<Set<string>>(new Set());
   const tasksRef = useRef<VideoTask[]>(tasks);
 
@@ -53,11 +133,13 @@ export default function VideoStudioPage() {
   }, [tasks]);
 
   useEffect(() => {
+    const timeouts = pollTimeoutsRef.current;
+    const urls = videoUrlsRef.current;
     return () => {
-      for (const t of pollTimeoutsRef.current.values()) {
+      for (const t of timeouts.values()) {
         clearTimeout(t);
       }
-      for (const url of videoUrlsRef.current) {
+      for (const url of urls) {
         URL.revokeObjectURL(url);
       }
     };
@@ -134,7 +216,8 @@ export default function VideoStudioPage() {
             duration: task.duration,
           }),
           status: "completed",
-          mediaPath: url,
+          // blob: URLs die with the session — don't persist them
+          mediaPath: null,
           mediaType: "video/mp4",
           parentId: null,
           costRub: task.cost,
@@ -175,7 +258,15 @@ export default function VideoStudioPage() {
   };
 
   const handleDeleteTask = async (taskId: string) => {
+    const timeout = pollTimeoutsRef.current.get(taskId);
+    if (timeout) clearTimeout(timeout);
     pollTimeoutsRef.current.delete(taskId);
+    pollErrorsRef.current.delete(taskId);
+    const task = tasksRef.current.find((t) => t.id === taskId);
+    if (task?.videoUrl) {
+      URL.revokeObjectURL(task.videoUrl);
+      videoUrlsRef.current.delete(task.videoUrl);
+    }
     try {
       await deleteGeneration(taskId);
     } catch (e) {
@@ -194,11 +285,20 @@ export default function VideoStudioPage() {
     try {
       const result = await pollVideo(task.remoteId);
       const data = JSON.parse(result);
+      pollErrorsRef.current.delete(taskId);
 
       const current = tasksRef.current.find((t) => t.id === taskId);
       if (!current) return;
 
-      if (data.cost != null && current.cost !== data.cost) {
+      // Terminal states persist their cost in their own saveGeneration call
+      // below — writing the stale in-flight status here can regress a
+      // "completed" row back to "pending" if the writes land out of order.
+      if (
+        data.cost != null &&
+        current.cost !== data.cost &&
+        data.status !== "completed" &&
+        data.status !== "failed"
+      ) {
         saveGeneration({
           id: taskId,
           projectId: null,
@@ -280,8 +380,25 @@ export default function VideoStudioPage() {
       const delay = data.status === "processing" ? 3000 : 5000;
       const to = setTimeout(() => doPoll(taskId), delay);
       pollTimeoutsRef.current.set(taskId, to);
-    } catch {
-      const to = setTimeout(() => doPoll(taskId), 5000);
+    } catch (e) {
+      // Bounded retries with backoff — give up instead of polling forever
+      const failures = (pollErrorsRef.current.get(taskId) ?? 0) + 1;
+      pollErrorsRef.current.set(taskId, failures);
+      if (failures >= 5) {
+        pollTimeoutsRef.current.delete(taskId);
+        pollErrorsRef.current.delete(taskId);
+        setError(`Опрос статуса видео прерван: ${e}`);
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === taskId
+              ? { ...t, status: "failed" as const, error: `Polling failed: ${e}` }
+              : t,
+          ),
+        );
+        return;
+      }
+      const backoff = 5000 * Math.min(failures, 6);
+      const to = setTimeout(() => doPoll(taskId), backoff);
       pollTimeoutsRef.current.set(taskId, to);
     }
   };
@@ -298,6 +415,7 @@ export default function VideoStudioPage() {
       if (task.status !== "pending" && task.status !== "processing") continue;
       schedulePoll(task.id);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- schedulePoll reads only refs
   }, [tasks]);
 
   const handleModelChange = (newModel: string) => {
@@ -306,7 +424,8 @@ export default function VideoStudioPage() {
   };
 
   const handleCreate = async () => {
-    if (!prompt.trim()) return;
+    if (!prompt.trim() || creating) return;
+    setCreating(true);
     setError(null);
     const taskId = generateId();
 
@@ -368,6 +487,7 @@ export default function VideoStudioPage() {
         ),
       );
     }
+    setCreating(false);
   };
 
   const activeTasks = tasks.filter(
@@ -375,77 +495,6 @@ export default function VideoStudioPage() {
   );
   const completedTasks = tasks.filter(
     (t) => t.status === "completed",
-  );
-
-  const TaskCard = ({ task }: { task: VideoTask }) => (
-    <div
-      key={task.id}
-      className="rounded-lg border border-zinc-800 bg-zinc-900 p-4"
-    >
-      <div className="flex items-center justify-between">
-        <div className="min-w-0 flex-1">
-          <p className="line-clamp-1 text-sm text-zinc-300">
-            {task.prompt}
-          </p>
-          <p className="mt-1 text-xs text-zinc-500">
-            {task.model}
-            {task.duration && (
-              <span className="ml-2">
-                {DURATION_LABELS[task.duration] ?? `${task.duration}s`}
-              </span>
-            )}
-          </p>
-        </div>
-        <div className="ml-4 flex shrink-0 items-center gap-3">
-          {task.cost != null && (
-            <span className="text-xs text-zinc-500">
-              {formatCostRub(task.cost)}
-            </span>
-          )}
-          <div className="flex items-center gap-2 text-xs text-zinc-500">
-            <Clock className="h-3 w-3" />
-            {task.status === "pending"
-              ? "Queued"
-              : task.status === "processing"
-                ? "Processing..."
-                : task.status === "completed"
-                  ? "Completed"
-                  : "Failed"}
-          </div>
-          <div
-            className={cn(
-              "h-2 w-2 rounded-full",
-              task.status === "completed"
-                ? "bg-emerald-400"
-                : task.status === "failed"
-                  ? "bg-red-400"
-                  : task.status === "processing"
-                    ? "animate-pulse bg-amber-400"
-                    : "bg-zinc-600",
-            )}
-          />
-          <button
-            onClick={() => handleDeleteTask(task.id)}
-            className="rounded p-1 text-zinc-600 transition-colors hover:text-red-400"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-
-      {task.status === "processing" && (
-        <div className="mt-3 h-1 overflow-hidden rounded-full bg-zinc-800">
-          <div className="animate-progress h-full rounded-full bg-violet-500" />
-        </div>
-      )}
-
-      {task.status === "failed" && task.error && (
-        <div className="mt-3 flex items-start gap-2 rounded-lg bg-red-500/10 p-2 text-xs text-red-400">
-          <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
-          <span>{task.error}</span>
-        </div>
-      )}
-    </div>
   );
 
   return (
@@ -496,10 +545,10 @@ export default function VideoStudioPage() {
             </select>
             <button
               onClick={handleCreate}
-              disabled={!prompt.trim()}
+              disabled={!prompt.trim() || creating}
               className="ml-auto rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Create Video Task
+              {creating ? "Creating..." : "Create Video Task"}
             </button>
           </div>
         </div>
@@ -523,7 +572,7 @@ export default function VideoStudioPage() {
           {activeTasks.length > 0 && (
             <div className="space-y-3">
               {activeTasks.map((task) => (
-                <TaskCard key={task.id} task={task} />
+                <TaskCard key={task.id} task={task} onDelete={handleDeleteTask} />
               ))}
             </div>
           )}
@@ -532,6 +581,7 @@ export default function VideoStudioPage() {
             <div className={cn(activeTasks.length > 0 && "mt-6")}>
               <button
                 onClick={() => setCompletedExpanded((v) => !v)}
+                aria-expanded={completedExpanded}
                 className="flex w-full items-center gap-2 text-sm font-medium text-zinc-400 transition-colors hover:text-zinc-300"
               >
                 <span className={cn("transition-transform", completedExpanded && "rotate-90")}>
@@ -585,6 +635,8 @@ export default function VideoStudioPage() {
                           ) : null}
                           <button
                             onClick={() => handleDeleteTask(task.id)}
+                            title="Delete task"
+                            aria-label="Delete task"
                             className="rounded p-1 text-zinc-600 transition-colors hover:text-red-400"
                           >
                             <Trash2 className="h-3.5 w-3.5" />

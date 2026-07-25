@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Canvas as FabricCanvas, FabricImage } from "fabric";
+import { suspendHistory, resumeHistory } from "../utils/historySuspend";
 
 const CANVAS_BG = "#1a1a2e";
 
@@ -43,7 +44,9 @@ export function useFabricCanvas() {
           { cssOnly: true } as any,
         );
         instance.renderAll();
-      } catch {}
+      } catch {
+        // canvas already disposed — ignore resize
+      }
     };
 
     const resizeObserver = new ResizeObserver(handleResize);
@@ -57,7 +60,11 @@ export function useFabricCanvas() {
       window.removeEventListener("resize", handleResize);
       imageRef.current = null;
       setCanvas(null);
-      try { instance.dispose(); } catch {}
+      try {
+        instance.dispose();
+      } catch {
+        // already disposed
+      }
       fabricRef.current = null;
     };
   }, []);
@@ -79,33 +86,40 @@ export function useFabricCanvas() {
     }
 
     console.log("[loadImage] image loaded, size:", img.width, "x", img.height);
-    instance.clear();
-    instance.remove(...instance.getObjects());
+    suspendHistory(instance);
+    try {
+      instance.clear();
+      instance.remove(...instance.getObjects());
+      // clear() resets the background — restore it
+      instance.backgroundColor = CANVAS_BG;
 
-    const canvasW = instance.getWidth();
-    const canvasH = instance.getHeight();
-    const imgW = img.width!;
-    const imgH = img.height!;
+      const canvasW = instance.getWidth();
+      const canvasH = instance.getHeight();
+      const imgW = img.width!;
+      const imgH = img.height!;
 
-    const scale = Math.min(canvasW / imgW, canvasH / imgH, 1);
-    img.scale(scale);
-    img.set({
-      left: (canvasW - imgW * scale) / 2,
-      top: (canvasH - imgH * scale) / 2,
-      selectable: false,
-      evented: false,
-      hasControls: false,
-      hasBorders: false,
-      lockMovementX: true,
-      lockMovementY: true,
-      lockRotation: true,
-      lockScalingX: true,
-      lockScalingY: true,
-    });
+      const scale = Math.min(canvasW / imgW, canvasH / imgH, 1);
+      img.scale(scale);
+      img.set({
+        left: (canvasW - imgW * scale) / 2,
+        top: (canvasH - imgH * scale) / 2,
+        selectable: false,
+        evented: false,
+        hasControls: false,
+        hasBorders: false,
+        lockMovementX: true,
+        lockMovementY: true,
+        lockRotation: true,
+        lockScalingX: true,
+        lockScalingY: true,
+      });
 
-    instance.add(img as any);
-    imageRef.current = img as any;
-    instance.renderAll();
+      instance.add(img as any);
+      imageRef.current = img as any;
+      instance.renderAll();
+    } finally {
+      resumeHistory(instance);
+    }
   }, []);
 
   const setZoom = useCallback((zoom: number) => {

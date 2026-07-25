@@ -8,6 +8,10 @@ export async function setApiKey(key: string): Promise<void> {
   return apiInvoke("set_api_key", { key });
 }
 
+export async function deleteApiKey(): Promise<void> {
+  return apiInvoke("delete_api_key");
+}
+
 export async function testConnection(): Promise<string> {
   return apiInvoke("test_connection");
 }

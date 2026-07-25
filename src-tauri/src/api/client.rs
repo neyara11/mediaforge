@@ -1,8 +1,8 @@
 use reqwest::Client;
 use std::time::Duration;
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
 
-use super::retry::{should_retry, is_rate_limit, with_retry, with_retry_if};
+use super::retry::{should_retry, is_rate_limit, with_retry_if};
 
 pub const API_BASE_URL: &str = "https://routerai.ru/api/v1";
 
@@ -24,11 +24,75 @@ impl ApiState {
     }
 }
 
+/// Shared client: connection pooling / keep-alive across requests.
+static SHARED_CLIENT: OnceLock<Client> = OnceLock::new();
+
 pub fn create_client() -> Client {
-    Client::builder()
-        .timeout(Duration::from_secs(120))
-        .build()
-        .expect("Failed to create HTTP client")
+    SHARED_CLIENT
+        .get_or_init(|| {
+            Client::builder()
+                .timeout(Duration::from_secs(120))
+                .build()
+                .expect("Failed to create HTTP client")
+        })
+        .clone()
+}
+
+/// Client for long-running streamed generations: no total timeout, only a
+/// per-read idle timeout, so a slow SSE generation isn't killed at 120 s.
+static STREAM_CLIENT: OnceLock<Client> = OnceLock::new();
+
+fn create_stream_client() -> Client {
+    STREAM_CLIENT
+        .get_or_init(|| {
+            Client::builder()
+                .read_timeout(Duration::from_secs(120))
+                .build()
+                .expect("Failed to create streaming HTTP client")
+        })
+        .clone()
+}
+
+/// Errors that must never be retried: insufficient balance (402) and
+/// non-retryable 4xx responses ("API error 4xx: ...").
+fn is_fatal_error(e: &str) -> bool {
+    e == "Insufficient balance" || e.starts_with("API error ")
+}
+
+/// GET requests are idempotent — retry anything except fatal errors.
+fn retryable_get_error(e: &String) -> bool {
+    !is_fatal_error(e)
+}
+
+/// POSTs here are paid generation endpoints. Retry network failures and rate
+/// limits, but never 5xx ("Server error ..."): the server may have processed
+/// the generation, and a blind retry would charge the balance twice.
+fn retryable_paid_post_error(e: &String) -> bool {
+    !is_fatal_error(e) && !e.starts_with("Server error")
+}
+
+/// On HTTP 429 honor the server's Retry-After header (capped at 60 s) before
+/// the retry loop fires again.
+async fn wait_for_rate_limit(resp: &reqwest::Response) {
+    let wait_secs = resp
+        .headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(0)
+        .min(60);
+    if wait_secs > 0 {
+        tokio::time::sleep(Duration::from_secs(wait_secs)).await;
+    }
+}
+
+fn get_api_key(state: &ApiState) -> Result<String, String> {
+    state
+        .api_key
+        .read()
+        .map_err(|e| e.to_string())?
+        .clone()
+        .ok_or_else(|| "API key not set".to_string())
 }
 
 pub async fn api_get(
@@ -36,17 +100,10 @@ pub async fn api_get(
     path: &str,
 ) -> Result<String, String> {
     let url = format!("{}{}", state.base_url, path);
-    let api_key = {
-        state
-            .api_key
-            .read()
-            .map_err(|e| e.to_string())?
-            .clone()
-            .ok_or_else(|| "API key not set".to_string())?
-    };
+    let api_key = get_api_key(state)?;
     let client = create_client();
 
-    with_retry(
+    with_retry_if(
         || {
             let client = client.clone();
             let url = url.clone();
@@ -65,6 +122,7 @@ pub async fn api_get(
                 }
                 if should_retry(status) {
                     if is_rate_limit(status) {
+                        wait_for_rate_limit(&resp).await;
                         return Err("Rate limited".to_string());
                     }
                     return Err(format!("Server error {}", status));
@@ -78,6 +136,7 @@ pub async fn api_get(
             }
         },
         3,
+        retryable_get_error,
     )
     .await
 }
@@ -87,17 +146,10 @@ pub async fn api_get_bytes(
     path: &str,
 ) -> Result<Vec<u8>, String> {
     let url = format!("{}{}", state.base_url, path);
-    let api_key = {
-        state
-            .api_key
-            .read()
-            .map_err(|e| e.to_string())?
-            .clone()
-            .ok_or_else(|| "API key not set".to_string())?
-    };
+    let api_key = get_api_key(state)?;
     let client = create_client();
 
-    with_retry(
+    with_retry_if(
         || {
             let client = client.clone();
             let url = url.clone();
@@ -116,6 +168,7 @@ pub async fn api_get_bytes(
                 }
                 if should_retry(status) {
                     if is_rate_limit(status) {
+                        wait_for_rate_limit(&resp).await;
                         return Err("Rate limited".to_string());
                     }
                     return Err(format!("Server error {}", status));
@@ -129,6 +182,7 @@ pub async fn api_get_bytes(
             }
         },
         3,
+        retryable_get_error,
     )
     .await
 }
@@ -139,14 +193,7 @@ pub async fn api_post(
     body: &str,
 ) -> Result<String, String> {
     let url = format!("{}{}", state.base_url, path);
-    let api_key = {
-        state
-            .api_key
-            .read()
-            .map_err(|e| e.to_string())?
-            .clone()
-            .ok_or_else(|| "API key not set".to_string())?
-    };
+    let api_key = get_api_key(state)?;
     let client = create_client();
 
     with_retry_if(
@@ -186,7 +233,7 @@ pub async fn api_post(
             }
         },
         3,
-        |e: &String| e != "Insufficient balance",
+        retryable_paid_post_error,
     )
     .await
 }
@@ -197,17 +244,10 @@ pub async fn api_post_binary(
     body: &str,
 ) -> Result<Vec<u8>, String> {
     let url = format!("{}{}", state.base_url, path);
-    let api_key = {
-        state
-            .api_key
-            .read()
-            .map_err(|e| e.to_string())?
-            .clone()
-            .ok_or_else(|| "API key not set".to_string())?
-    };
+    let api_key = get_api_key(state)?;
     let client = create_client();
 
-    with_retry(
+    with_retry_if(
         || {
             let client = client.clone();
             let url = url.clone();
@@ -229,6 +269,7 @@ pub async fn api_post_binary(
                 }
                 if should_retry(status) {
                     if is_rate_limit(status) {
+                        wait_for_rate_limit(&resp).await;
                         return Err("Rate limited".to_string());
                     }
                     return Err(format!("Server error {}", status));
@@ -242,6 +283,7 @@ pub async fn api_post_binary(
             }
         },
         3,
+        retryable_paid_post_error,
     )
     .await
 }
@@ -252,17 +294,10 @@ pub async fn api_post_stream(
     body_json: &str,
 ) -> Result<String, String> {
     let url = format!("{}{}", state.base_url, path);
-    let api_key = {
-        state
-            .api_key
-            .read()
-            .map_err(|e| e.to_string())?
-            .clone()
-            .ok_or_else(|| "API key not set".to_string())?
-    };
-    let client = create_client();
+    let api_key = get_api_key(state)?;
+    let client = create_stream_client();
 
-    with_retry(
+    with_retry_if(
         || {
             let client = client.clone();
             let url = url.clone();
@@ -284,6 +319,7 @@ pub async fn api_post_stream(
                 }
                 if should_retry(status) {
                     if is_rate_limit(status) {
+                        wait_for_rate_limit(&resp).await;
                         return Err("Rate limited".to_string());
                     }
                     return Err(format!("Server error {}", status));
@@ -308,6 +344,7 @@ pub async fn api_post_stream(
             }
         },
         3,
+        retryable_paid_post_error,
     )
     .await
 }

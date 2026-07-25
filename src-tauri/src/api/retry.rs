@@ -11,18 +11,6 @@ pub fn default_retry_durations() -> Vec<Duration> {
     ]
 }
 
-pub async fn with_retry<F, Fut, T, E>(
-    operation: F,
-    max_retries: usize,
-) -> Result<T, E>
-where
-    F: Fn() -> Fut,
-    Fut: Future<Output = Result<T, E>>,
-    E: std::fmt::Debug,
-{
-    with_retry_if(operation, max_retries, |_| true).await
-}
-
 pub async fn with_retry_if<F, Fut, T, E>(
     operation: F,
     max_retries: usize,

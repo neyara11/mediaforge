@@ -85,6 +85,18 @@ export default function SpeechLabPage() {
   const [customVoice, setCustomVoice] = useState("");
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const audioUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    audioUrlRef.current = audioUrl;
+  }, [audioUrl]);
+
+  // Revoke the TTS blob URL on unmount
+  useEffect(() => {
+    return () => {
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+    };
+  }, []);
 
   // STT state
   const [sttFilePath, setSttFilePath] = useState<string | null>(null);
@@ -145,7 +157,8 @@ export default function SpeechLabPage() {
     }
   };
 
-  const effectiveVoice = customVoice || ttsVoice;
+  // ttsVoice === "__custom__" means the free-form voice input is active
+  const effectiveVoice = customVoice || (ttsVoice === "__custom__" ? "" : ttsVoice);
 
   const handleTts = async () => {
     if (!ttsText.trim()) return;
@@ -311,6 +324,7 @@ export default function SpeechLabPage() {
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
     const w = getCurrentWindow();
     w.onDragDropEvent((event) => {
       const payload = event.payload as { type: string; paths?: string[] };
@@ -333,9 +347,13 @@ export default function SpeechLabPage() {
         }
       }
     }).then((fn) => {
-      unlisten = fn;
+      // The component may have unmounted before registration resolved —
+      // unsubscribe immediately in that case instead of leaking the listener.
+      if (disposed) fn();
+      else unlisten = fn;
     });
     return () => {
+      disposed = true;
       unlisten?.();
     };
   }, []);
@@ -382,7 +400,7 @@ export default function SpeechLabPage() {
               value={supportsVoice ? ttsVoice : "__custom__"}
               onChange={(e) => {
                 if (e.target.value === "__custom__") {
-                  setTtsVoice("");
+                  setTtsVoice("__custom__");
                 } else {
                   setTtsVoice(e.target.value);
                   setCustomVoice("");
@@ -469,6 +487,14 @@ export default function SpeechLabPage() {
         <div className="space-y-4">
           <div
             onClick={pickSttFile}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                pickSttFile();
+              }
+            }}
             className={cn(
               "cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-colors",
               dragOver

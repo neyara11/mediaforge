@@ -19,6 +19,7 @@ import {
   Lasso,
   Crop,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "../../../../shared/utils";
 import type { EditorTool } from "../hooks/useEditorTools";
 
@@ -35,7 +36,7 @@ interface ToolSettings {
 interface EditorToolbarProps {
   tool: EditorTool;
   setTool: (tool: EditorTool) => void;
-  tools: { value: EditorTool; label: string; shortcut: string }[];
+  tools: { value: EditorTool; labelKey: string; shortcut: string }[];
   settings: ToolSettings;
   updateSetting: (key: string, value: string | number) => void;
   canUndo: boolean;
@@ -86,6 +87,7 @@ export default function EditorToolbar({
   zoom,
   showSidebar,
 }: EditorToolbarProps) {
+  const { t: tr } = useTranslation("editor");
   return (
     <div className="flex items-center gap-1 overflow-x-auto border-b border-zinc-800 bg-zinc-900 p-2">
       {tools.map((t) => {
@@ -94,7 +96,7 @@ export default function EditorToolbar({
           <button
             key={t.value}
             onClick={() => setTool(t.value)}
-            title={`${t.label} (${t.shortcut})`}
+            title={`${tr(t.labelKey)} (${t.shortcut})`}
             className={cn(
               "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm transition-colors",
               tool === t.value
@@ -118,14 +120,17 @@ export default function EditorToolbar({
             value={settings.brushSize}
             onChange={(e) => updateSetting("brushSize", Number(e.target.value))}
             className="h-4 w-20 accent-violet-500"
-            title="Brush size"
+            title={tr("toolbar.brushSize")}
           />
-          <input
-            type="color"
-            value={settings.brushColor}
-            onChange={(e) => updateSetting("brushColor", e.target.value)}
-            className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-zinc-800 p-0"
-          />
+          {tool === "brush" && (
+            <input
+              type="color"
+              value={settings.brushColor}
+              onChange={(e) => updateSetting("brushColor", e.target.value)}
+              className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-zinc-800 p-0"
+              title={tr("toolbar.brushColor")}
+            />
+          )}
           <span className="text-xs text-zinc-500">
             {settings.brushSize}px
           </span>
@@ -134,8 +139,7 @@ export default function EditorToolbar({
 
       {tool === "mask" && (
         <div className="flex shrink-0 items-center gap-2">
-          <span className="text-xs text-zinc-400">Кисть 50px</span>
-          <span className="text-xs text-zinc-500">— закрасьте область для inpainting</span>
+          <span className="text-xs text-zinc-500">{tr("toolbar.maskHint")}</span>
         </div>
       )}
 
@@ -171,14 +175,14 @@ export default function EditorToolbar({
             value={settings.fillColor}
             onChange={(e) => updateSetting("fillColor", e.target.value)}
             className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-zinc-800 p-0"
-            title="Fill color"
+            title={tr("toolbar.fillColor")}
           />
           <input
             type="color"
             value={settings.strokeColor}
             onChange={(e) => updateSetting("strokeColor", e.target.value)}
             className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-zinc-800 p-0"
-            title="Stroke color"
+            title={tr("toolbar.strokeColor")}
           />
           <input
             type="range"
@@ -187,7 +191,7 @@ export default function EditorToolbar({
             value={settings.strokeWidth}
             onChange={(e) => updateSetting("strokeWidth", Number(e.target.value))}
             className="h-4 w-16 accent-violet-500"
-            title="Stroke width"
+            title={tr("toolbar.strokeWidth")}
           />
           <span className="text-xs text-zinc-500">
             {settings.strokeWidth}px
@@ -200,7 +204,7 @@ export default function EditorToolbar({
       <button
         onClick={onUndo}
         disabled={!canUndo}
-        title="Undo (Ctrl+Z)"
+        title={tr("toolbar.undo")}
         className={cn(
           "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors",
           canUndo
@@ -214,7 +218,7 @@ export default function EditorToolbar({
       <button
         onClick={onRedo}
         disabled={!canRedo}
-        title="Redo (Ctrl+Shift+Z)"
+        title={tr("toolbar.redo")}
         className={cn(
           "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors",
           canRedo
@@ -229,7 +233,7 @@ export default function EditorToolbar({
 
       <button
         onClick={onZoomOut}
-        title="Zoom Out"
+        title={tr("toolbar.zoomOut")}
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
       >
         <ZoomOut className="h-4 w-4" />
@@ -241,7 +245,7 @@ export default function EditorToolbar({
 
       <button
         onClick={onZoomIn}
-        title="Zoom In"
+        title={tr("toolbar.zoomIn")}
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
       >
         <ZoomIn className="h-4 w-4" />
@@ -249,7 +253,7 @@ export default function EditorToolbar({
 
       <button
         onClick={onFitScreen}
-        title="Fit to Screen"
+        title={tr("toolbar.fitScreen")}
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
       >
         <Maximize className="h-4 w-4" />
@@ -259,7 +263,7 @@ export default function EditorToolbar({
 
       <button
         onClick={onOpen}
-        title="Open Image"
+        title={tr("toolbar.openImage")}
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
       >
         <FolderOpen className="h-4 w-4" />
@@ -267,7 +271,7 @@ export default function EditorToolbar({
 
       <button
         onClick={onSave}
-        title="Save (Ctrl+S)"
+        title={tr("toolbar.save")}
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
       >
         <Save className="h-4 w-4" />
@@ -275,7 +279,7 @@ export default function EditorToolbar({
 
       <button
         onClick={onExport}
-        title="Export PNG"
+        title={tr("toolbar.exportPng")}
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
       >
         <Download className="h-4 w-4" />
@@ -285,7 +289,7 @@ export default function EditorToolbar({
 
       <button
         onClick={onToggleSidebar}
-        title={showSidebar ? "Hide Sidebar" : "Show Sidebar"}
+        title={showSidebar ? tr("toolbar.hideSidebar") : tr("toolbar.showSidebar")}
         className={cn(
           "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors",
           showSidebar

@@ -64,7 +64,7 @@ export default function MusicStudioPage() {
   const audioModel = useDefaultModel("audio");
   const textModel = useDefaultModel("text");
 
-  const isRu = i18n.language === "ru";
+  const isRu = i18n.language?.startsWith("ru") ?? false;
 
   useEffect(() => { currentTrackRef.current = currentTrack; }, [currentTrack]);
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
@@ -86,6 +86,7 @@ export default function MusicStudioPage() {
     audio.addEventListener("play", onPlay);
     audio.addEventListener("pause", onPause);
 
+    const urls = audioUrlsRef.current;
     return () => {
       audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("loadedmetadata", onLoadedMetadata);
@@ -94,10 +95,10 @@ export default function MusicStudioPage() {
       audio.removeEventListener("pause", onPause);
       audio.pause();
       audio.src = "";
-      for (const url of audioUrlsRef.current) {
+      for (const url of urls) {
         URL.revokeObjectURL(url);
       }
-      audioUrlsRef.current.clear();
+      urls.clear();
     };
   }, []);
 
@@ -189,21 +190,38 @@ export default function MusicStudioPage() {
     const audio = audioRef.current;
     if (!audio || !track.audioUrl) return;
 
-    if (currentTrackRef.current?.id === track.id && isPlayingRef.current) {
+    const isSameTrack = currentTrackRef.current?.id === track.id;
+    if (isSameTrack && isPlayingRef.current) {
       audio.pause();
-    } else {
-      audio.src = track.audioUrl;
-      audio.play().catch(console.error);
+      return;
     }
+    if (!isSameTrack || !audio.src) {
+      audio.src = track.audioUrl;
+    }
+    audio.play().catch(console.error);
   }, []);
 
   const selectTrack = useCallback((track: Track) => {
+    const audio = audioRef.current;
+    const isSame = currentTrackRef.current?.id === track.id;
+
+    if (isSame) {
+      // Clicking the current track toggles play/pause
+      playTrack(track);
+      return;
+    }
+
     currentTrackRef.current = track;
     setCurrentTrack(track);
     setLyrics(track.lyrics);
     setCurrentTime(0);
-    if (track.audioUrl) {
-      playTrack(track);
+    if (track.audioUrl && audio) {
+      audio.src = track.audioUrl;
+      audio.play().catch(console.error);
+    } else if (audio) {
+      // Text-only track: stop whatever was playing
+      audio.pause();
+      audio.src = "";
     }
   }, [playTrack]);
 
@@ -244,18 +262,27 @@ export default function MusicStudioPage() {
   const handleDeleteTrack = useCallback(async (trackId: string) => {
     try {
       await deleteGeneration(trackId);
-      setTracks((prev) => prev.filter((t) => t.id !== trackId));
-      if (currentTrackRef.current?.id === trackId) {
-        currentTrackRef.current = null;
-        setCurrentTrack(null);
-        setLyrics("");
+    } catch (e) {
+      console.error("Delete failed:", e);
+      return;
+    }
+    setTracks((prev) => {
+      const doomed = prev.find((t) => t.id === trackId);
+      if (doomed?.audioUrl) {
+        URL.revokeObjectURL(doomed.audioUrl);
+        audioUrlsRef.current.delete(doomed.audioUrl);
       }
+      return prev.filter((t) => t.id !== trackId);
+    });
+    // Only stop playback when the deleted track is the one playing
+    if (currentTrackRef.current?.id === trackId) {
+      currentTrackRef.current = null;
+      setCurrentTrack(null);
+      setLyrics("");
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.src = "";
       }
-    } catch (e) {
-      console.error("Delete failed:", e);
     }
   }, []);
 
@@ -357,7 +384,8 @@ Genre: ${genre}, Tempo: ${tempo}`,
           requestJson: JSON.stringify({ prompt: trackPrompt, genre, tempo, model: audioModel.defaultModel }),
           responseJson,
           status: "completed",
-          mediaPath: audioUrl,
+          // blob: URLs die with the session — don't persist them
+          mediaPath: null,
           mediaType: result.audio_base64 ? `audio/${result.audio_format}` : "text/lyrics",
           parentId: null,
           costRub: result.cost,
@@ -393,6 +421,8 @@ Genre: ${genre}, Tempo: ${tempo}`,
             </div>
             <button
               onClick={() => setShowPromptBuilder(!showPromptBuilder)}
+              title={isRu ? "AI-ассистент промптов" : "AI prompt assistant"}
+              aria-label={isRu ? "AI-ассистент промптов" : "AI prompt assistant"}
               className={cn(
                 "rounded-lg border p-2 text-zinc-400 transition-colors hover:border-violet-500",
                 showPromptBuilder && "border-violet-500 text-violet-400",
@@ -472,6 +502,8 @@ Genre: ${genre}, Tempo: ${tempo}`,
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => currentTrack && playTrack(currentTrack)}
+                    title={isPlaying ? (isRu ? "Пауза" : "Pause") : (isRu ? "Играть" : "Play")}
+                    aria-label={isPlaying ? (isRu ? "Пауза" : "Pause") : (isRu ? "Играть" : "Play")}
                     className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-600 text-white transition-colors hover:bg-violet-500"
                   >
                     {isPlaying ? (

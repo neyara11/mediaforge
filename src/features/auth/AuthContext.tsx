@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
-import { setApiKey, testConnection, checkAuth } from "../../api/endpoints/auth";
+import { setApiKey, deleteApiKey, testConnection, checkAuth, getBalance } from "../../api/endpoints/auth";
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -47,24 +47,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (key: string) => {
     try {
       await setApiKey(key);
-      const result = await testConnection();
-      const parsed = JSON.parse(result);
-      const balance = parsed?.balance || parsed?.data?.[0]?.balance;
-      setState({
-        isAuthenticated: true,
-        apiKey: key,
-        balance: balance?.toString() ?? null,
-        onboardingComplete: false,
-        initialized: true,
-      });
-      return { success: true, balance: balance?.toString() };
+      await testConnection();
     } catch (e) {
       console.error("[Auth] testConnection failed:", e);
+      // Roll back the invalid key so the next launch doesn't skip onboarding
+      try {
+        await deleteApiKey();
+      } catch (delErr) {
+        console.error("[Auth] failed to roll back invalid key:", delErr);
+      }
       return { success: false, error: String(e) };
     }
+
+    let balance: string | null = null;
+    try {
+      const balanceJson = await getBalance();
+      const parsed = JSON.parse(balanceJson);
+      const raw = parsed?.balance ?? parsed?.data?.balance ?? parsed?.amount;
+      balance = raw != null ? String(raw) : null;
+    } catch (e) {
+      console.warn("[Auth] getBalance failed:", e);
+    }
+
+    setState({
+      isAuthenticated: true,
+      apiKey: key,
+      balance,
+      onboardingComplete: false,
+      initialized: true,
+    });
+    return { success: true, balance: balance ?? undefined };
   }, []);
 
   const logout = useCallback(() => {
+    deleteApiKey().catch((e) => console.error("[Auth] deleteApiKey failed:", e));
     setState({
       isAuthenticated: false,
       apiKey: null,

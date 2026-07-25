@@ -22,9 +22,11 @@ pub fn run() {
             let state = app.state::<ApiState>();
             let store = handle.store("settings.json").map_err(|e| format!("Store error: {}", e))?;
             if let Some(key) = store.get("api_key").and_then(|v| v.as_str().map(|s| s.to_string())) {
-                if let Ok(mut guard) = state.api_key.write() {
-                    *guard = Some(key);
-                }
+                let mut guard = state
+                    .api_key
+                    .write()
+                    .map_err(|e| format!("API key lock poisoned: {}", e))?;
+                *guard = Some(key);
             }
 
             db::init_dirs(&handle)?;
@@ -49,7 +51,6 @@ pub fn run() {
                 Ok::<_, String>(())
             })?;
 
-            let _window = app.get_webview_window("main").unwrap();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -66,6 +67,7 @@ pub fn run() {
             commands::models::get_model_info,
             commands::auth::check_auth,
             commands::auth::set_api_key,
+            commands::auth::delete_api_key,
             commands::auth::test_connection,
             commands::auth::get_balance,
             commands::storage::save_media,

@@ -20,6 +20,14 @@ export default class ErrorBoundary extends Component<Props, State> {
     return { hasError: true, error: error.message };
   }
 
+  componentDidCatch(error: Error, info: { componentStack?: string | null }) {
+    console.error("[ErrorBoundary]", error, info.componentStack);
+  }
+
+  handleReset = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
   render() {
     if (this.state.hasError) {
       return (
@@ -30,6 +38,12 @@ export default class ErrorBoundary extends Component<Props, State> {
               <pre className="mt-2 max-w-md whitespace-pre-wrap text-xs text-red-300/70">
                 {this.state.error}
               </pre>
+              <button
+                onClick={this.handleReset}
+                className="mt-4 rounded-lg border border-red-800 px-3 py-1.5 text-xs text-red-300 transition-colors hover:bg-red-900/50"
+              >
+                Try again
+              </button>
             </div>
           </div>
         )

@@ -1,7 +1,11 @@
 import { useState, useCallback, useRef } from "react";
 import { Canvas as FabricCanvas } from "fabric";
+import { isHistorySuspended } from "../utils/historySuspend";
 
 const MAX_HISTORY = 50;
+
+/** Custom object properties that must survive undo/redo serialization. */
+const EXTRA_SERIALIZED_PROPS = ["isMask"];
 
 interface UseEditorHistoryReturn {
   undo: () => void;
@@ -28,8 +32,12 @@ export function useEditorHistory(
 
   const pushState = useCallback(() => {
     if (!canvas || restoringRef.current || canvas.destroyed) return;
+    // Bulk operations (clear+add, crop, lasso overlays) suppress intermediate states
+    if (isHistorySuspended(canvas)) return;
 
-    const json = JSON.stringify(canvas.toJSON());
+    const json = JSON.stringify(
+      (canvas.toJSON as (...args: string[][]) => object)(EXTRA_SERIALIZED_PROPS),
+    );
 
     const history = historyRef.current;
     const idx = indexRef.current;
@@ -47,7 +55,7 @@ export function useEditorHistory(
   }, [canvas, updateFlags]);
 
   const undo = useCallback(() => {
-    if (!canvas || canvas.destroyed) return;
+    if (!canvas || canvas.destroyed || restoringRef.current) return;
     const idx = indexRef.current;
     if (idx <= 0) return;
 
@@ -67,7 +75,7 @@ export function useEditorHistory(
   }, [canvas, updateFlags]);
 
   const redo = useCallback(() => {
-    if (!canvas || canvas.destroyed) return;
+    if (!canvas || canvas.destroyed || restoringRef.current) return;
     const history = historyRef.current;
     const idx = indexRef.current;
     if (idx >= history.length - 1) return;

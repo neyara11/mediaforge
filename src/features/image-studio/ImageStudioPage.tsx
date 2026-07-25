@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Image, Download, SlidersHorizontal, Upload, X, History, Trash2, Pencil } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -14,6 +15,8 @@ interface ImageResult {
   b64: string;
   model: string;
   genId?: string;
+  /** Index of this image inside the generation batch */
+  idx?: number;
 }
 
 interface ReferenceImage {
@@ -39,6 +42,7 @@ function fileToBase64(file: File): Promise<ReferenceImage> {
 }
 
 export default function ImageStudioPage() {
+  const { t } = useTranslation("editor");
   const navigate = useNavigate();
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState("1024x1024");
@@ -71,54 +75,50 @@ export default function ImageStudioPage() {
 
   const imageN = modelCaps.maxN >= 4 ? 4 : 1;
 
-  useEffect(() => {
-    const loadHistory = async () => {
-      try {
-        const gens = await getGenerations(undefined, "/v1/images");
-        console.log(`Loaded ${gens.length} generations from DB`);
-        const imageGens = gens.filter(
-          (g) => g.endpoint === "/v1/images",
-        );
-        console.log(`Image generations (any status): ${imageGens.length}`, imageGens.map(g => ({ id: g.id, status: g.status, hasResponse: !!g.responseJson })));
-        const completed = imageGens.filter(g => g.status === "completed");
-        console.log(`Completed image generations: ${completed.length}`);
-        // Only show completed in history
-        const historyFromDb = completed;
-        const images: ImageResult[] = [];
-        for (const g of historyFromDb) {
-          if (!g.responseJson) {
-            console.log("Skipping gen (no responseJson):", g.id);
-            continue;
-          }
-          try {
-            const parsed = JSON.parse(g.responseJson);
-            const data: { b64_json?: string }[] = parsed?.data ?? [];
-            console.log(`Gen ${g.id}: ${data.length} images in responseJson`);
-            for (const d of data) {
-              if (d.b64_json) {
-                images.push({
-                  id: `${g.id}_${images.length}`,
-                  b64: d.b64_json,
-                  model: g.model,
-                });
-              }
+  const loadHistory = useCallback(async () => {
+    try {
+      const gens = await getGenerations(undefined, "/v1/images");
+      const completed = gens.filter(
+        (g) => g.endpoint === "/v1/images" && g.status === "completed",
+      );
+      const images: ImageResult[] = [];
+      for (const g of completed) {
+        if (!g.responseJson) continue;
+        try {
+          const parsed = JSON.parse(g.responseJson);
+          const data: { b64_json?: string }[] = parsed?.data ?? [];
+          data.forEach((d, idx) => {
+            if (d.b64_json) {
+              images.push({
+                id: `${g.id}_${idx}`,
+                b64: d.b64_json,
+                model: g.model,
+                genId: g.id,
+                idx,
+              });
             }
-          } catch {
-            /* skip malformed JSON */
-          }
+          });
+        } catch {
+          /* skip malformed JSON */
         }
-        setHistoryImages(images);
-        console.log(`Loaded ${images.length} image generations from DB`);
-      } catch (e) {
-        console.error("Failed to load image history:", e);
       }
-    };
-    loadHistory();
+      setHistoryImages(images);
+    } catch (e) {
+      console.error("Failed to load image history:", e);
+    }
   }, []);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   const handleModelChange = (newModel: string) => {
     setDefaultModel(newModel);
     setSetting("default_image_model", newModel).catch(() => {});
+    // Reset size to a value valid for the newly selected model
+    const m = newModel.toLowerCase();
+    const isSeed = m.includes("seed") || m.includes("seedream");
+    setSize(isSeed ? "1920x1920" : "1024x1024");
   };
 
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -128,12 +128,12 @@ export default function ImageStudioPage() {
       const ref = await fileToBase64(file);
       setReferenceImage(ref);
     } catch {
-      setError("Failed to read reference image");
+      setError(t("studio.readRefError"));
     }
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
-  }, []);
+  }, [t]);
 
   const handleRemoveReference = useCallback(() => {
     setReferenceImage(null);
@@ -165,16 +165,16 @@ export default function ImageStudioPage() {
       const parsed = JSON.parse(result);
       const genId = generateId();
       const images: ImageResult[] = (parsed?.data ?? []).map(
-        (d: { b64_json?: string }, _i: number) => ({
+        (d: { b64_json?: string }, idx: number) => ({
           id: generateId(),
           b64: d.b64_json ?? "",
           model: defaultModel,
           genId,
+          idx,
         }),
       );
       setResults(images);
       setSelected(images[0] ?? null);
-      setHistoryImages((prev) => [...images, ...prev]);
 
       try {
         await saveGeneration({
@@ -191,10 +191,11 @@ export default function ImageStudioPage() {
           costRub: parsed?.usage?.cost ?? null,
           generationId: parsed?.generation_id ?? null,
         });
-        console.log("Image saved to DB:", genId);
+        // Refresh history from the DB so fresh images don't render twice
+        loadHistory();
       } catch (e) {
         console.error("saveGeneration failed:", e);
-        setError(`Ошибка сохранения: ${e}`);
+        setError(t("studio.saveError", { error: String(e) }));
       }
     } catch (e) {
       setError(String(e));
@@ -219,12 +220,16 @@ export default function ImageStudioPage() {
   };
 
   const handleDeleteResult = async (img: ImageResult) => {
-    const baseId = img.id.includes("_") ? img.id.split("_")[0] : img.id;
+    // The DB record is per-generation; deleting one image of a batch removes
+    // the whole record, so drop all sibling images from state too.
+    const genId = img.genId ?? (img.id.includes("_") ? img.id.split("_")[0] : img.id);
+    const sameGen = (r: ImageResult) =>
+      (r.genId ?? (r.id.includes("_") ? r.id.split("_")[0] : r.id)) === genId;
     try {
-      await deleteGeneration(baseId);
-      setResults((prev) => prev.filter((r) => r.id !== img.id));
-      setHistoryImages((prev) => prev.filter((r) => r.id !== img.id));
-      if (selected?.id === img.id) {
+      await deleteGeneration(genId);
+      setResults((prev) => prev.filter((r) => !sameGen(r)));
+      setHistoryImages((prev) => prev.filter((r) => !sameGen(r)));
+      if (selected && sameGen(selected)) {
         setSelected(null);
       }
     } catch (e) {
@@ -239,6 +244,14 @@ export default function ImageStudioPage() {
     }
   };
 
+  const openInEditor = useCallback(
+    (img: ImageResult) => {
+      const genId = img.genId ?? img.id.split("_")[0];
+      navigate(`/image-studio/editor/${genId}?idx=${img.idx ?? 0}`);
+    },
+    [navigate],
+  );
+
   return (
     <div className="flex h-full">
       <div className="flex flex-1 flex-col">
@@ -248,13 +261,15 @@ export default function ImageStudioPage() {
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Опишите изображение..."
+                placeholder={t("studio.promptPlaceholder")}
                 rows={2}
                 className="w-full resize-none rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-violet-500"
               />
             </div>
             <button
               onClick={() => setShowPromptBuilder(!showPromptBuilder)}
+              title="AI prompt assistant"
+              aria-label="AI prompt assistant"
               className={cn(
                 "rounded-lg border p-2 text-zinc-400 transition-colors hover:border-violet-500",
                 showPromptBuilder && "border-violet-500 text-violet-400",
@@ -279,7 +294,7 @@ export default function ImageStudioPage() {
               <button
                 onClick={handleRemoveReference}
                 className="rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
-                title="Remove reference image"
+                title={t("studio.removeReference")}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -332,17 +347,17 @@ export default function ImageStudioPage() {
             <button
               onClick={() => fileInputRef.current?.click()}
               className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-violet-500 hover:text-zinc-300"
-              title="Upload reference image"
+              title={t("studio.uploadReference")}
             >
               <Upload className="mr-1 inline-block h-3.5 w-3.5" />
-              Reference
+              {t("studio.reference")}
             </button>
             <button
               onClick={handleGenerate}
               disabled={!prompt.trim() || loading}
               className="ml-auto rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {loading ? "Генерация..." : "Generate"}
+              {loading ? t("studio.generating") : t("studio.generate")}
             </button>
           </div>
         </div>
@@ -358,20 +373,24 @@ export default function ImageStudioPage() {
                 <span className="text-xs text-zinc-500">{selected.model}</span>
                 <div className="flex items-center gap-1">
                   <button
-                    onClick={() => navigate(`/image-studio/editor/${selected.genId || selected.id.split("_")[0]}`)}
+                    onClick={() => openInEditor(selected)}
                     className="rounded p-1 text-zinc-500 hover:text-violet-400"
-                    title="Редактировать"
+                    title={t("studio.edit")}
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
                   <button
                     onClick={() => handleDownload(selected)}
+                    title="Download"
+                    aria-label="Download"
                     className="rounded p-1 text-zinc-500 hover:text-zinc-300"
                   >
                     <Download className="h-4 w-4" />
                   </button>
                   <button
                     onClick={() => handleDeleteResult(selected)}
+                    title="Delete"
+                    aria-label="Delete"
                     className="rounded p-1 text-zinc-500 hover:text-red-400"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -414,7 +433,7 @@ export default function ImageStudioPage() {
                     <Trash2 className="h-3 w-3" />
                   </button>
                   <button
-                    onClick={(e) => { e.stopPropagation(); navigate(`/image-studio/editor/${img.genId || img.id.split("_")[0]}`); }}
+                    onClick={(e) => { e.stopPropagation(); openInEditor(img); }}
                     className="absolute right-7 top-1 rounded bg-zinc-900/80 p-1 text-zinc-500 opacity-0 transition-opacity hover:text-violet-400 group-hover:opacity-100"
                     title="Редактировать"
                   >
@@ -429,7 +448,7 @@ export default function ImageStudioPage() {
             <div className="flex h-64 items-center justify-center text-zinc-600">
               <div className="text-center">
                 <Image className="mx-auto mb-3 h-8 w-8 opacity-50" />
-                <p className="text-sm">Введите промпт и нажмите Generate</p>
+                <p className="text-sm">{t("studio.emptyHint")}</p>
               </div>
             </div>
           )}
@@ -438,9 +457,9 @@ export default function ImageStudioPage() {
             <>
               <div className="mb-3 mt-6 flex items-center gap-2">
                 <History className="h-4 w-4 text-zinc-500" />
-                <span className="text-xs font-medium text-zinc-500">История</span>
+                <span className="text-xs font-medium text-zinc-500">{t("studio.history")}</span>
                 <div className="flex-1 border-t border-zinc-800" />
-                <span className="text-xs text-zinc-600">{historyImages.length} изобр.</span>
+                <span className="text-xs text-zinc-600">{t("studio.historyCount", { count: historyImages.length })}</span>
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {historyImages.map((img) => (
@@ -467,7 +486,7 @@ export default function ImageStudioPage() {
                       <Trash2 className="h-3 w-3" />
                     </button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); navigate(`/image-studio/editor/${img.genId || img.id.split("_")[0]}`); }}
+                      onClick={(e) => { e.stopPropagation(); openInEditor(img); }}
                       className="absolute right-7 top-1 rounded bg-zinc-900/80 p-1 text-zinc-500 opacity-0 transition-opacity hover:text-violet-400 group-hover:opacity-100"
                       title="Редактировать"
                     >
@@ -484,7 +503,7 @@ export default function ImageStudioPage() {
               <div className="flex items-center gap-2">
                 <History className="h-4 w-4 text-zinc-600" />
                 <span className="text-xs text-zinc-600">
-                  История пуста — сгенерируйте изображение
+                  {t("studio.historyEmpty")}
                 </span>
               </div>
             </div>

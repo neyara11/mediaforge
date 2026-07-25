@@ -16,7 +16,7 @@ export function enableEraser(canvas: FabricCanvas, size: number): void {
   brush.width = size;
   brush.color = "rgba(0,0,0,1)";
   canvas.freeDrawingBrush = brush;
-  canvas.freeDrawingCursor = "none";
+  canvas.freeDrawingCursor = "crosshair";
 
   const eraserPaths: FabricObject[] = [];
 

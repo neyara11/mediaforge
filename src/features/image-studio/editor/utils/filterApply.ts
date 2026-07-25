@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { filters as fabricFilters } from "fabric";
+import type { FabricObject } from "fabric";
 
 export type FilterType = "brightness" | "contrast" | "saturation" | "blur" | "sharpen";
 
@@ -95,4 +97,40 @@ function clamp(value: number, min: number, max: number): number {
 
 export function resetFilters(): FilterState {
   return { brightness: 0, contrast: 0, saturation: 1, blur: 0, sharpen: 0 };
+}
+
+/** Build the fabric.js filter chain for the current slider state. */
+export function buildFabricFilters(f: FilterState): InstanceType<typeof fabricFilters.BaseFilter>[] {
+  const list: InstanceType<typeof fabricFilters.BaseFilter>[] = [];
+  if (f.brightness !== 0) {
+    list.push(new fabricFilters.Brightness({ brightness: f.brightness / 255 }));
+  }
+  if (f.contrast !== 0) {
+    list.push(new fabricFilters.Contrast({ contrast: f.contrast / 100 }));
+  }
+  if (f.saturation !== 1) {
+    list.push(new fabricFilters.Saturation({ saturation: f.saturation - 1 }));
+  }
+  if (f.blur > 0) {
+    list.push(new fabricFilters.Blur({ blur: f.blur / 10 }));
+  }
+  if (f.sharpen > 0) {
+    const s = f.sharpen / 10;
+    list.push(
+      new fabricFilters.Convolute({
+        matrix: [0, -s, 0, -s, 1 + 4 * s, -s, 0, -s, 0],
+        opaque: false,
+      }),
+    );
+  }
+  return list;
+}
+
+/**
+ * Apply the filter state to a fabric image object. Fabric keeps the original
+ * element, so repeated calls with different values are non-destructive.
+ */
+export function applyFiltersToObject(obj: FabricObject, f: FilterState): void {
+  (obj as any).filters = buildFabricFilters(f);
+  (obj as any).applyFilters();
 }

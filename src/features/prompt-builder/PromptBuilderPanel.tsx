@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles, Wand2, ChevronDown, ChevronUp, Copy, Check } from "lucide-react";
 import { chatCompletion } from "../../api/endpoints/chat";
 import { useDefaultModel } from "../../shared/useDefaultModel";
@@ -35,13 +35,22 @@ export default function PromptBuilder({ mode, onUsePrompt }: PromptBuilderProps)
   const { defaultModel } = useDefaultModel("text");
   const [input, setInput] = useState("");
   const [generated, setGenerated] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
 
   const handleGenerate = async () => {
     if (!input.trim()) return;
     setLoading(true);
+    setError(null);
     try {
       const messages: ChatMessage[] = [
         { role: "system", content: SYSTEM_PROMPTS[mode] },
@@ -58,7 +67,7 @@ export default function PromptBuilder({ mode, onUsePrompt }: PromptBuilderProps)
       setGenerated(text);
       setExpanded(true);
     } catch (e) {
-      setGenerated(`Error: ${e}`);
+      setError(String(e));
     }
     setLoading(false);
   };
@@ -66,7 +75,8 @@ export default function PromptBuilder({ mode, onUsePrompt }: PromptBuilderProps)
   const handleCopy = () => {
     navigator.clipboard.writeText(generated);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -104,6 +114,12 @@ export default function PromptBuilder({ mode, onUsePrompt }: PromptBuilderProps)
             {loading ? "Generating..." : "Generate Prompt"}
           </button>
 
+          {error && (
+            <div className="rounded-lg bg-red-500/10 p-3 text-sm text-red-400">
+              {error}
+            </div>
+          )}
+
           {generated && (
             <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
               <div className="mb-2 flex items-center justify-between">
@@ -111,6 +127,8 @@ export default function PromptBuilder({ mode, onUsePrompt }: PromptBuilderProps)
                 <div className="flex gap-1">
                   <button
                     onClick={handleCopy}
+                    title="Copy prompt"
+                    aria-label="Copy prompt"
                     className="rounded p-1 text-xs text-zinc-500 hover:text-zinc-300"
                   >
                     {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}

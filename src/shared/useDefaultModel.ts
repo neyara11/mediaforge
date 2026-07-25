@@ -44,6 +44,19 @@ export function saveAvailableModels(modality: ModalityKey, ids: string[]): Promi
   return setSetting(`available_${modality}_models`, JSON.stringify(ids));
 }
 
+// The model catalog is shared across pages/modalities — cache the request so
+// mounting several hooks at once doesn't fire duplicate network calls.
+let modelsRequestCache: Promise<string> | null = null;
+function fetchModelsCached(): Promise<string> {
+  if (!modelsRequestCache) {
+    modelsRequestCache = fetchModels().catch((e) => {
+      modelsRequestCache = null;
+      throw e;
+    });
+  }
+  return modelsRequestCache;
+}
+
 export function useDefaultModel(modality: ModalityKey) {
   const [defaultModel, setDefaultModel] = useState(FALLBACKS[modality]);
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
@@ -51,12 +64,14 @@ export function useDefaultModel(modality: ModalityKey) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
       try {
         const [idsJson, result] = await Promise.all([
           getSetting(`available_${modality}_models`),
-          fetchModels(),
+          fetchModelsCached(),
         ]);
+        if (cancelled) return;
 
         let ids: string[] = [];
         if (idsJson) {
@@ -79,14 +94,17 @@ export function useDefaultModel(modality: ModalityKey) {
         setAvailableModels(options);
 
         const savedDefault = await getSetting(`default_${modality}_model`);
+        if (cancelled) return;
         setDefaultModel(savedDefault && ids.includes(savedDefault) ? savedDefault : ids[0]);
       } catch {
+        if (cancelled) return;
         setAvailableModels([{ id: FALLBACKS[modality], name: FALLBACKS[modality] }]);
         setDefaultModel(FALLBACKS[modality]);
       }
-      setLoading(false);
+      if (!cancelled) setLoading(false);
     };
     load();
+    return () => { cancelled = true; };
   }, [modality]);
 
   const updateAvailable = async (ids: string[]) => {

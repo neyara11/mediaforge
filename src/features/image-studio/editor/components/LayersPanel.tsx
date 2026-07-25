@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Trash2, Eye, EyeOff, ArrowUp, ArrowDown, GripVertical, Layers } from "lucide-react";
 import type { Canvas as FabricCanvas } from "fabric";
 import { cn } from "../../../../shared/utils";
@@ -36,6 +37,7 @@ function getObjectType(obj: any): string {
 }
 
 export default function LayersPanel({ canvas }: LayersPanelProps) {
+  const { t } = useTranslation("editor");
   const [layers, setLayers] = useState<LayerItem[]>([]);
 
   const refreshLayers = useCallback(() => {
@@ -92,7 +94,7 @@ export default function LayersPanel({ canvas }: LayersPanelProps) {
       const objects = canvas.getObjects();
       const idx = objects.indexOf(layer.object);
       if (idx < objects.length - 1) {
-        (canvas as any).moveTo(layer.object, idx + 1);
+        canvas.moveObjectTo(layer.object, idx + 1);
         canvas.renderAll();
         refreshLayers();
       }
@@ -106,7 +108,7 @@ export default function LayersPanel({ canvas }: LayersPanelProps) {
       const objects = canvas.getObjects();
       const idx = objects.indexOf(layer.object);
       if (idx > 0) {
-        (canvas as any).moveTo(layer.object, idx - 1);
+        canvas.moveObjectTo(layer.object, idx - 1);
         canvas.renderAll();
         refreshLayers();
       }
@@ -127,7 +129,7 @@ export default function LayersPanel({ canvas }: LayersPanelProps) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 py-12 text-zinc-600">
         <Layers className="h-8 w-8 opacity-50" />
-        <p className="text-xs">Загрузите изображение</p>
+        <p className="text-xs">{t("layers.noImage")}</p>
       </div>
     );
   }
@@ -136,7 +138,7 @@ export default function LayersPanel({ canvas }: LayersPanelProps) {
     return (
       <div className="flex flex-col items-center gap-2 py-12 text-zinc-600">
         <Layers className="h-8 w-8 opacity-50" />
-        <p className="text-xs">Нет слоёв</p>
+        <p className="text-xs">{t("layers.empty")}</p>
       </div>
     );
   }
@@ -144,7 +146,7 @@ export default function LayersPanel({ canvas }: LayersPanelProps) {
   return (
     <div className="flex flex-col gap-1">
       <div className="mb-2 flex items-center gap-2">
-        <span className="text-xs font-medium text-zinc-400">Слои</span>
+        <span className="text-xs font-medium text-zinc-400">{t("layers.title")}</span>
         <span className="text-xs text-zinc-600">{layers.length}</span>
       </div>
 
@@ -177,7 +179,7 @@ export default function LayersPanel({ canvas }: LayersPanelProps) {
                   e.stopPropagation();
                   handleToggleVisibility(layer);
                 }}
-                title={layer.visible ? "Hide" : "Show"}
+                title={layer.visible ? t("layers.hide") : t("layers.show")}
                 className="rounded p-0.5 text-zinc-500 transition-colors hover:text-zinc-300"
               >
                 {layer.visible ? (
@@ -193,6 +195,7 @@ export default function LayersPanel({ canvas }: LayersPanelProps) {
                   handleMoveUp(layer);
                 }}
                 disabled={isFirst}
+                title={t("layers.moveUp")}
                 className={cn(
                   "rounded p-0.5 transition-colors",
                   isFirst ? "cursor-not-allowed text-zinc-700" : "text-zinc-500 hover:text-zinc-300",
@@ -207,6 +210,7 @@ export default function LayersPanel({ canvas }: LayersPanelProps) {
                   handleMoveDown(layer);
                 }}
                 disabled={isLast}
+                title={t("layers.moveDown")}
                 className={cn(
                   "rounded p-0.5 transition-colors",
                   isLast ? "cursor-not-allowed text-zinc-700" : "text-zinc-500 hover:text-zinc-300",
@@ -220,7 +224,7 @@ export default function LayersPanel({ canvas }: LayersPanelProps) {
                   e.stopPropagation();
                   handleDelete(layer);
                 }}
-                title="Delete layer"
+                title={t("layers.delete")}
                 className="rounded p-0.5 text-zinc-500 transition-colors hover:text-red-400"
               >
                 <Trash2 className="h-3.5 w-3.5" />

@@ -27,5 +27,7 @@
   "readyDesc": "MediaForge is configured and ready.",
   "openApp": "Open App",
   "skip": "Skip",
-  "done": "Done"
+  "done": "Done",
+  "next": "Next",
+  "loadingModels": "Loading models..."
 }

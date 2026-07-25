@@ -104,9 +104,11 @@ function updateShape(
       (state.currentShape as Rect).set({ left, top, width, height });
       break;
     case "ellipse":
+      // Ellipse origin is its center — pin it to the drag midpoint so the
+      // shape follows the cursor in every direction.
       (state.currentShape as Ellipse).set({
-        left: state.startX,
-        top: state.startY,
+        left: (state.startX + pointerX) / 2,
+        top: (state.startY + pointerY) / 2,
         rx: width / 2,
         ry: height / 2,
       });

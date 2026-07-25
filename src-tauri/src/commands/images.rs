@@ -58,6 +58,7 @@ pub async fn generate_image(
             body["input_references"] = serde_json::Value::Array(refs);
         }
     }
+
     api_post(&state, "/images", &body.to_string()).await
 }
 

@@ -1,16 +1,27 @@
 import { Canvas as FabricCanvas, IText } from "fabric";
 
-export function enableTextTool(canvas: FabricCanvas): void {
+export interface TextToolOptions {
+  fontSize?: number;
+  fontFamily?: string;
+  fill?: string;
+  /** Initial content of a newly created text object */
+  text?: string;
+}
+
+export function enableTextTool(
+  canvas: FabricCanvas,
+  options?: TextToolOptions,
+): void {
   canvas.selection = false;
 
   const onClick = (opt: any) => {
     const pointer = opt.scenePoint;
-    const text = new IText("Текст", {
+    const text = new IText(options?.text ?? "Text", {
       left: pointer.x,
       top: pointer.y,
-      fontSize: 24,
-      fontFamily: "Arial, sans-serif",
-      fill: "#ffffff",
+      fontSize: options?.fontSize ?? 24,
+      fontFamily: options?.fontFamily ?? "Arial, sans-serif",
+      fill: options?.fill ?? "#ffffff",
       editable: true,
     });
     canvas.add(text);

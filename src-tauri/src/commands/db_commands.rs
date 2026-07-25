@@ -32,6 +32,7 @@ pub struct GenerationRow {
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelCacheRow {
     pub id: String,
     pub name: Option<String>,
@@ -113,19 +114,28 @@ pub async fn get_generations(
     project_id: Option<String>,
     endpoint: Option<String>,
 ) -> Result<Vec<GenerationRow>, String> {
-    let rows = if let Some(pid) = project_id {
+    let rows = if let (Some(pid), Some(ep)) = (&project_id, &endpoint) {
         sqlx::query_as::<_, GenerationRow>(
-            "SELECT * FROM generations WHERE project_id = ? ORDER BY created_at DESC"
+            "SELECT * FROM generations WHERE project_id = ? AND endpoint = ? ORDER BY created_at DESC"
         )
-        .bind(&pid)
+        .bind(pid)
+        .bind(ep)
         .fetch_all(&*pool)
         .await
         .map_err(|e| e.to_string())?
-    } else if let Some(ep) = endpoint {
+    } else if let Some(pid) = &project_id {
+        sqlx::query_as::<_, GenerationRow>(
+            "SELECT * FROM generations WHERE project_id = ? ORDER BY created_at DESC"
+        )
+        .bind(pid)
+        .fetch_all(&*pool)
+        .await
+        .map_err(|e| e.to_string())?
+    } else if let Some(ep) = &endpoint {
         sqlx::query_as::<_, GenerationRow>(
             "SELECT * FROM generations WHERE endpoint = ? ORDER BY created_at DESC"
         )
-        .bind(&ep)
+        .bind(ep)
         .fetch_all(&*pool)
         .await
         .map_err(|e| e.to_string())?
@@ -150,6 +160,16 @@ pub async fn get_models_cache(
         .map_err(|e| e.to_string())
 }
 
+/// Serialize a JSON sub-value, mapping missing/null to SQL NULL instead of
+/// the literal string "null".
+fn opt_json_string(v: &serde_json::Value) -> Option<String> {
+    if v.is_null() {
+        None
+    } else {
+        Some(v.to_string())
+    }
+}
+
 #[tauri::command]
 pub async fn save_models_cache(
     pool: State<'_, SqlitePool>,
@@ -158,8 +178,12 @@ pub async fn save_models_cache(
     let models: Vec<serde_json::Value> = serde_json::from_str(&models_json)
         .map_err(|e| format!("Invalid JSON: {}", e))?;
 
+    // DELETE + reinsert atomically so a mid-loop failure can't leave an
+    // empty cache behind.
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+
     sqlx::query("DELETE FROM model_cache")
-        .execute(&*pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -167,10 +191,10 @@ pub async fn save_models_cache(
         let id = model["id"].as_str().unwrap_or("").to_string();
         let name = model["name"].as_str().map(|s| s.to_string());
         let provider = model["provider"].as_str().map(|s| s.to_string());
-        let input_mod = model["input_modalities"].to_string();
-        let output_mod = model["output_modalities"].to_string();
-        let pricing = model["pricing"].to_string();
-        let params = model["supported_params"].to_string();
+        let input_mod = opt_json_string(&model["input_modalities"]);
+        let output_mod = opt_json_string(&model["output_modalities"]);
+        let pricing = opt_json_string(&model["pricing"]);
+        let params = opt_json_string(&model["supported_params"]);
 
         sqlx::query(
             "INSERT INTO model_cache (id, name, provider, input_modalities, output_modalities, pricing_json, supported_params)
@@ -183,11 +207,12 @@ pub async fn save_models_cache(
             .bind(&output_mod)
             .bind(&pricing)
             .bind(&params)
-            .execute(&*pool)
+            .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
     }
 
+    tx.commit().await.map_err(|e| e.to_string())?;
     Ok(())
 }
 

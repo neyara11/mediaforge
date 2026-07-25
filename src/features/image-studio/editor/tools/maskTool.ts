@@ -4,7 +4,7 @@ import {
   FabricObject,
 } from "fabric";
 
-const MASK_COLOR = "rgba(255, 0, 0, 0.4)";
+export const MASK_COLOR = "rgba(255, 0, 0, 0.4)";
 const MASK_BRUSH_SIZE = 50;
 
 export function enableMaskMode(canvas: FabricCanvas, _brushSize: number): void {
@@ -38,7 +38,13 @@ export function disableMaskMode(canvas: FabricCanvas): void {
 }
 
 export function getMaskObjects(canvas: FabricCanvas): FabricObject[] {
-  return canvas.getObjects().filter((obj) => (obj as any).isMask === true);
+  // isMask is serialized via toJSON(["isMask"]) so it survives undo/redo;
+  // fall back to the mask stroke color for objects restored from older states.
+  return canvas.getObjects().filter(
+    (obj) =>
+      (obj as any).isMask === true ||
+      (obj.type === "path" && (obj as any).stroke === MASK_COLOR),
+  );
 }
 
 export function clearMask(canvas: FabricCanvas): void {

@@ -2,7 +2,7 @@ use reqwest::Client;
 use std::time::Duration;
 use std::sync::RwLock;
 
-use super::retry::{should_retry, is_rate_limit, with_retry};
+use super::retry::{should_retry, is_rate_limit, with_retry, with_retry_if};
 
 pub const API_BASE_URL: &str = "https://routerai.ru/api/v1";
 
@@ -149,7 +149,7 @@ pub async fn api_post(
     };
     let client = create_client();
 
-    with_retry(
+    with_retry_if(
         || {
             let client = client.clone();
             let url = url.clone();
@@ -170,10 +170,12 @@ pub async fn api_post(
                     return Err("Insufficient balance".to_string());
                 }
                 if should_retry(status) {
+                    let error_body = resp.text().await.unwrap_or_default();
+                    eprintln!("[api_post] retryable error {} body: {}", status, error_body);
                     if is_rate_limit(status) {
-                        return Err("Rate limited".to_string());
+                        return Err(format!("Rate limited: {}", error_body));
                     }
-                    return Err(format!("Server error {}", status));
+                    return Err(format!("Server error {}: {}", status, error_body));
                 }
                 if !resp.status().is_success() {
                     let body = resp.text().await.unwrap_or_default();
@@ -184,6 +186,7 @@ pub async fn api_post(
             }
         },
         3,
+        |e: &String| e != "Insufficient balance",
     )
     .await
 }

@@ -1,7 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./features/auth/AuthContext";
 import Layout from "./components/Layout";
+import ErrorBoundary from "./components/ErrorBoundary";
 import ImageStudioPage from "./features/image-studio/ImageStudioPage";
+import ImageEditorPage from "./features/image-studio/editor/ImageEditorPage";
 import SpeechLabPage from "./features/speech-lab/SpeechLabPage";
 import VideoStudioPage from "./features/video-studio/VideoStudioPage";
 import MusicStudioPage from "./features/music-studio/MusicStudioPage";
@@ -34,6 +36,7 @@ function AppRoutes() {
       <Route element={<Layout />}>
         <Route path="/" element={<Navigate to="/image-studio" replace />} />
         <Route path="/image-studio" element={<ImageStudioPage />} />
+        <Route path="/image-studio/editor/:genId" element={<ErrorBoundary><ImageEditorPage /></ErrorBoundary>} />
         <Route path="/speech-lab" element={<SpeechLabPage />} />
         <Route path="/video-studio" element={<VideoStudioPage />} />
         <Route path="/music-studio" element={<MusicStudioPage />} />

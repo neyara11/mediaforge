@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
-import { Image, Download, SlidersHorizontal, Upload, X, History, Trash2 } from "lucide-react";
+import { Image, Download, SlidersHorizontal, Upload, X, History, Trash2, Pencil } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
+import { useNavigate } from "react-router-dom";
 import { generateImage } from "../../api/endpoints/images";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
@@ -12,6 +13,7 @@ interface ImageResult {
   id: string;
   b64: string;
   model: string;
+  genId?: string;
 }
 
 interface ReferenceImage {
@@ -37,6 +39,7 @@ function fileToBase64(file: File): Promise<ReferenceImage> {
 }
 
 export default function ImageStudioPage() {
+  const navigate = useNavigate();
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState("1024x1024");
   const [quality, setQuality] = useState("auto");
@@ -160,18 +163,19 @@ export default function ImageStudioPage() {
         input_references: inputRefs,
       });
       const parsed = JSON.parse(result);
+      const genId = generateId();
       const images: ImageResult[] = (parsed?.data ?? []).map(
         (d: { b64_json?: string }, _i: number) => ({
           id: generateId(),
           b64: d.b64_json ?? "",
           model: defaultModel,
+          genId,
         }),
       );
       setResults(images);
       setSelected(images[0] ?? null);
       setHistoryImages((prev) => [...images, ...prev]);
 
-      const genId = generateId();
       try {
         await saveGeneration({
           id: genId,
@@ -354,6 +358,13 @@ export default function ImageStudioPage() {
                 <span className="text-xs text-zinc-500">{selected.model}</span>
                 <div className="flex items-center gap-1">
                   <button
+                    onClick={() => navigate(`/image-studio/editor/${selected.genId || selected.id.split("_")[0]}`)}
+                    className="rounded p-1 text-zinc-500 hover:text-violet-400"
+                    title="Редактировать"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
                     onClick={() => handleDownload(selected)}
                     className="rounded p-1 text-zinc-500 hover:text-zinc-300"
                   >
@@ -402,6 +413,13 @@ export default function ImageStudioPage() {
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); navigate(`/image-studio/editor/${img.genId || img.id.split("_")[0]}`); }}
+                    className="absolute right-7 top-1 rounded bg-zinc-900/80 p-1 text-zinc-500 opacity-0 transition-opacity hover:text-violet-400 group-hover:opacity-100"
+                    title="Редактировать"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
                 </div>
               ))}
             </div>
@@ -447,6 +465,13 @@ export default function ImageStudioPage() {
                       className="absolute right-1 top-1 rounded bg-zinc-900/80 p-1 text-zinc-500 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
                     >
                       <Trash2 className="h-3 w-3" />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); navigate(`/image-studio/editor/${img.genId || img.id.split("_")[0]}`); }}
+                      className="absolute right-7 top-1 rounded bg-zinc-900/80 p-1 text-zinc-500 opacity-0 transition-opacity hover:text-violet-400 group-hover:opacity-100"
+                      title="Редактировать"
+                    >
+                      <Pencil className="h-3 w-3" />
                     </button>
                   </div>
                 ))}

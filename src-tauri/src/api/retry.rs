@@ -20,6 +20,19 @@ where
     Fut: Future<Output = Result<T, E>>,
     E: std::fmt::Debug,
 {
+    with_retry_if(operation, max_retries, |_| true).await
+}
+
+pub async fn with_retry_if<F, Fut, T, E>(
+    operation: F,
+    max_retries: usize,
+    mut should_retry_err: impl FnMut(&E) -> bool,
+) -> Result<T, E>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+    E: std::fmt::Debug,
+{
     let durations = default_retry_durations();
     let mut last_error = None;
 
@@ -27,6 +40,9 @@ where
         match operation().await {
             Ok(result) => return Ok(result),
             Err(e) => {
+                if !should_retry_err(&e) {
+                    return Err(e);
+                }
                 last_error = Some(e);
                 if attempt < max_retries.min(durations.len()) {
                     sleep(durations[attempt]).await;

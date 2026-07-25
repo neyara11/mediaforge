@@ -19,5 +19,11 @@ export default tseslint.config(
   },
   {
     ignores: ["dist", "src-tauri/target", "node_modules"],
-  }
+  },
+  {
+    files: ["src/features/image-studio/editor/**/*.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
 );

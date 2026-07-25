@@ -6,3 +6,4 @@ pub mod models;
 pub mod auth;
 pub mod storage;
 pub mod db_commands;
+pub mod editor;

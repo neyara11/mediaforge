@@ -80,6 +80,16 @@ pub fn run() {
             commands::db_commands::get_setting,
             commands::db_commands::set_setting,
             commands::db_commands::delete_generation,
+            commands::editor::load_image_from_path,
+            commands::editor::apply_native_filter,
+            commands::editor::inpaint_image,
+            commands::editor::generative_expand,
+            commands::editor::style_transfer,
+            commands::editor::enhance_image,
+            commands::editor::edit_region,
+            commands::editor::save_editor_project,
+            commands::editor::load_editor_project,
+            commands::editor::export_canvas_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

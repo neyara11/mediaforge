@@ -17,7 +17,7 @@ const MODALITY_LABELS: Record<ModalityKey, string> = {
 const FALLBACKS: Record<ModalityKey, string> = {
   image: "openai/gpt-image-1",
   video: "bytedance/seedance-2.0",
-  audio: "google/lyria-3-clip",
+  audio: "google/lyria-3-pro-preview",
   stt: "openai/whisper-large-v3",
   tts: "x-ai/grok-voice-tts-1.0",
   text: "openai/gpt-4o",

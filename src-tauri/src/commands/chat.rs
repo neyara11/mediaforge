@@ -38,7 +38,12 @@ pub async fn chat_audio_generate(
         "stream": true,
     });
 
-    let raw = api_post_stream(&state, "/chat/completions", &body.to_string()).await?;
+    let body_str = body.to_string();
+    eprintln!("[Audio SSE] Request model={}, prompt_len={}, body_len={}", model, prompt.len(), body_str.len());
+    let prompt_preview: String = prompt.chars().take(200).collect();
+    eprintln!("[Audio SSE] Prompt preview (first 200 chars): {}", prompt_preview);
+
+    let raw = api_post_stream(&state, "/chat/completions", &body_str).await?;
 
     let preview: String = raw.chars().take(500).collect();
     eprintln!("[Audio SSE] raw len: {}, preview:\n{}", raw.len(), preview);
@@ -49,6 +54,8 @@ pub async fn chat_audio_generate(
     let mut sse_count = 0u32;
     let mut audio_chunks = 0u32;
     let mut text_chunks = 0u32;
+    let mut finish_reason = String::new();
+    let mut native_finish_reason = String::new();
 
     for line in raw.lines() {
         let line = line.trim();
@@ -57,17 +64,31 @@ pub async fn chat_audio_generate(
         }
         if let Some(data) = line.strip_prefix("data: ") {
             if data == "[DONE]" { break; }
-            sse_count += 1;
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                if let Some(err) = parsed["error"]["message"].as_str() {
+                    let err_type = parsed["error"]["metadata"]["error_type"]
+                        .as_str()
+                        .unwrap_or("unknown");
+                    return Err(format!("API error ({err_type}): {err}"));
+                }
                 if let Some(choices) = parsed["choices"].as_array() {
+                    sse_count += 1;
                     if let Some(first) = choices.first() {
                         if let Some(content) = first["delta"]["content"].as_str() {
-                            lyrics_text.push_str(content);
-                            text_chunks += 1;
+                            if !content.is_empty() {
+                                lyrics_text.push_str(content);
+                                text_chunks += 1;
+                            }
                         }
                         if let Some(audio_data) = first["delta"]["audio"]["data"].as_str() {
                             audio_base64.push_str(audio_data);
                             audio_chunks += 1;
+                        }
+                        if let Some(fr) = first["finish_reason"].as_str() {
+                            finish_reason = fr.to_string();
+                        }
+                        if let Some(nfr) = first["native_finish_reason"].as_str() {
+                            native_finish_reason = nfr.to_string();
                         }
                     }
                 }
@@ -90,14 +111,16 @@ pub async fn chat_audio_generate(
     }
 
     if audio_base64.is_empty() {
-        // Fallback: model returned text only (no audio parameter supported?)
-        // Return text as lyrics without audio
-        eprintln!("[Audio SSE] WARNING: No audio data in response. Check 'audio' parameter support for this model.");
+        eprintln!("[Audio SSE] WARNING: No audio data in response. finish_reason={}, native_finish_reason={}", finish_reason, native_finish_reason);
         if lyrics_text.is_empty() {
-            return Err(format!(
-                "No content received in {} SSE events. Model may not support audio generation.",
-                sse_count
-            ));
+            let reason_detail = if !native_finish_reason.is_empty() {
+                native_finish_reason.clone()
+            } else if !finish_reason.is_empty() {
+                finish_reason.clone()
+            } else {
+                "unknown".to_string()
+            };
+            return Err(format!("Audio generation rejected by provider (native: {}). This usually means:\n- Google AI Studio free tier quota exhausted or model temporarily unavailable\n- Prompt content was filtered by safety checks\n- Model does not support audio output through this provider\nTry again later, use a shorter/simpler prompt, or check RouterAI logs at https://routerai.ru/settings/logs", reason_detail));
         }
     }
 

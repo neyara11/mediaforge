@@ -35,8 +35,8 @@ export async function saveGeneration(params: {
   });
 }
 
-export async function getGenerations(projectId?: string): Promise<Generation[]> {
-  return apiInvoke("get_generations", { projectId: projectId ?? null });
+export async function getGenerations(projectId?: string, endpoint?: string): Promise<Generation[]> {
+  return apiInvoke("get_generations", { projectId: projectId ?? null, endpoint: endpoint ?? null });
 }
 
 export async function getModelsCache(): Promise<unknown[]> {
@@ -53,4 +53,8 @@ export async function getSetting(key: string): Promise<string | null> {
 
 export async function setSetting(key: string, value: string): Promise<void> {
   return apiInvoke("set_setting", { key, value });
+}
+
+export async function deleteGeneration(id: string): Promise<void> {
+  return apiInvoke("delete_generation", { id });
 }

@@ -111,6 +111,7 @@ pub async fn save_generation(
 pub async fn get_generations(
     pool: State<'_, SqlitePool>,
     project_id: Option<String>,
+    endpoint: Option<String>,
 ) -> Result<Vec<GenerationRow>, String> {
     let rows = if let Some(pid) = project_id {
         sqlx::query_as::<_, GenerationRow>(
@@ -120,9 +121,17 @@ pub async fn get_generations(
         .fetch_all(&*pool)
         .await
         .map_err(|e| e.to_string())?
+    } else if let Some(ep) = endpoint {
+        sqlx::query_as::<_, GenerationRow>(
+            "SELECT * FROM generations WHERE endpoint = ? ORDER BY created_at DESC"
+        )
+        .bind(&ep)
+        .fetch_all(&*pool)
+        .await
+        .map_err(|e| e.to_string())?
     } else {
         sqlx::query_as::<_, GenerationRow>(
-            "SELECT * FROM generations ORDER BY created_at DESC LIMIT 100"
+            "SELECT * FROM generations ORDER BY created_at DESC"
         )
         .fetch_all(&*pool)
         .await
@@ -205,8 +214,21 @@ pub async fn set_setting(
         "INSERT INTO user_settings (key, value) VALUES (?, ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')"
     )
-        .bind(&key)
+         .bind(&key)
         .bind(&value)
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_generation(
+    pool: State<'_, SqlitePool>,
+    id: String,
+) -> Result<(), String> {
+    sqlx::query("DELETE FROM generations WHERE id = ?")
+        .bind(&id)
         .execute(&*pool)
         .await
         .map_err(|e| e.to_string())?;

@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { Video, Clock, AlertCircle, Download } from "lucide-react";
+import { Video, Clock, AlertCircle, Download, Trash2 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import { createVideo, pollVideo, downloadVideo } from "../../api/endpoints/videos";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
-import { cn, generateId, formatCostRub } from "../../shared/utils";
+import { cn, generateId, formatCostRub, bytesToBase64 } from "../../shared/utils";
 import { useDefaultModel } from "../../shared/useDefaultModel";
-import { saveGeneration, setSetting, getGenerations } from "../../db";
+import { saveGeneration, setSetting, getGenerations, deleteGeneration } from "../../db";
 
 interface VideoTask {
   id: string;
@@ -64,7 +66,7 @@ export default function VideoStudioPage() {
   useEffect(() => {
     const recover = async () => {
       try {
-        const gens = await getGenerations();
+        const gens = await getGenerations(undefined, "/v1/videos");
         const videoGens = gens.filter((g) => g.endpoint === "/v1/videos" && g.generationId);
         console.log(`Loaded ${videoGens.length} video generations from DB`);
 
@@ -150,6 +152,36 @@ export default function VideoStudioPage() {
       );
       pollTimeoutsRef.current.delete(taskId);
     }
+  };
+
+  const handleSaveVideoToDisk = async (taskId: string, remoteId: string) => {
+    try {
+      const bytes = await downloadVideo(remoteId);
+      const base64 = bytesToBase64(bytes);
+      const task = tasksRef.current.find((t) => t.id === taskId);
+      const defaultName = task
+        ? `video_${task.id.slice(0, 8)}.mp4`
+        : "video.mp4";
+      const filePath = await save({
+        defaultPath: defaultName,
+        filters: [{ name: "MP4 Video", extensions: ["mp4"] }],
+      });
+      if (filePath) {
+        await invoke("save_base64_file", { base64Data: base64, filePath });
+      }
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    pollTimeoutsRef.current.delete(taskId);
+    try {
+      await deleteGeneration(taskId);
+    } catch (e) {
+      console.error("Delete failed:", e);
+    }
+    setTasks((prev) => prev.filter((t) => t.id !== taskId));
   };
 
   const doPoll = async (taskId: string) => {
@@ -392,6 +424,12 @@ export default function VideoStudioPage() {
                     : "bg-zinc-600",
             )}
           />
+          <button
+            onClick={() => handleDeleteTask(task.id)}
+            className="rounded p-1 text-zinc-600 transition-colors hover:text-red-400"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
         </div>
       </div>
 
@@ -538,13 +576,19 @@ export default function VideoStudioPage() {
                             <span className="text-xs text-emerald-400">&#10003;</span>
                           ) : task.remoteId ? (
                             <button
-                              onClick={() => handleVideoDownload(task.id, task.remoteId!)}
+                              onClick={() => handleSaveVideoToDisk(task.id, task.remoteId!)}
                               className="flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-violet-500"
                             >
                               <Download className="h-3 w-3" />
-                              Re-download
+                              Download
                             </button>
                           ) : null}
+                          <button
+                            onClick={() => handleDeleteTask(task.id)}
+                            className="rounded p-1 text-zinc-600 transition-colors hover:text-red-400"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
                         </div>
                       </div>
 

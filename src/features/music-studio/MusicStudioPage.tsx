@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Music, Play, Pause, Sparkles, Volume2, Download } from "lucide-react";
+import { Music, Play, Pause, Sparkles, Volume2, Download, Trash2 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { chatCompletion, chatAudioGenerate } from "../../api/endpoints/chat";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
 import { useDefaultModel } from "../../shared/useDefaultModel";
-import { saveGeneration, getGenerations, setSetting } from "../../db";
+import { saveGeneration, getGenerations, setSetting, deleteGeneration } from "../../db";
 import type { ChatMessage } from "../../api/types";
 
 interface Track {
@@ -106,15 +106,17 @@ export default function MusicStudioPage() {
 
     (async () => {
       try {
-        const generations = await getGenerations();
+        const generations = await getGenerations(undefined, "/v1/chat/completions");
         if (cancelled) return;
 
-        const musicGenerations = generations.filter(
-          (g) =>
-            g.endpoint === "/v1/chat/completions" &&
-            (g.mediaType?.startsWith("audio/") || g.mediaType === "text/lyrics") &&
-            g.status === "completed"
-        );
+        const musicGenerations = generations
+          .filter(
+            (g) =>
+              g.endpoint === "/v1/chat/completions" &&
+              (g.mediaType?.startsWith("audio/") || g.mediaType === "text/lyrics") &&
+              g.status === "completed"
+          )
+          .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
         console.log(`Loaded ${musicGenerations.length} music generations from DB`);
 
         const loadedTracks: Track[] = [];
@@ -166,12 +168,12 @@ export default function MusicStudioPage() {
         }
 
         if (!cancelled) {
-          // Renumber tracks with genre info
-          const renamed = loadedTracks.map((t, i) => ({
+          // Renumber tracks with genre info, newest first
+          const numbered = loadedTracks.map((t, i) => ({
             ...t,
             name: `Track ${i + 1} — ${t.genre}`,
           }));
-          setTracks(renamed);
+          setTracks(numbered.reverse());
         }
       } catch (e) {
         if (!cancelled) {
@@ -239,6 +241,24 @@ export default function MusicStudioPage() {
     }
   }, []);
 
+  const handleDeleteTrack = useCallback(async (trackId: string) => {
+    try {
+      await deleteGeneration(trackId);
+      setTracks((prev) => prev.filter((t) => t.id !== trackId));
+      if (currentTrackRef.current?.id === trackId) {
+        currentTrackRef.current = null;
+        setCurrentTrack(null);
+        setLyrics("");
+      }
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = "";
+      }
+    } catch (e) {
+      console.error("Delete failed:", e);
+    }
+  }, []);
+
   const handleTextModelChange = (newModel: string) => {
     textModel.setDefaultModel(newModel);
     setSetting("default_text_model", newModel).catch(() => {});
@@ -297,16 +317,20 @@ Genre: ${genre}, Tempo: ${tempo}`,
       }
 
       const trackId = generateId();
+      const maxNum = tracks.reduce((max, t) => {
+        const m = t.name.match(/^Track (\d+)/);
+        return m ? Math.max(max, parseInt(m[1])) : max;
+      }, 0);
       const newTrack: Track = {
         id: trackId,
-        name: `Track ${tracks.length + 1} — ${genre}`,
+        name: `Track ${maxNum + 1} — ${genre}`,
         genre,
         lyrics: result.lyrics,
         audioUrl,
         audioBase64: result.audio_base64,
         audioFormat: result.audio_format,
       };
-      setTracks((prev) => [...prev, newTrack]);
+      setTracks((prev) => [newTrack, ...prev]);
       currentTrackRef.current = newTrack;
       setCurrentTrack(newTrack);
       setLyrics(result.lyrics);
@@ -517,34 +541,45 @@ Genre: ${genre}, Tempo: ${tempo}`,
                 {tracks.map((track) => {
                   const isCurrent = currentTrack?.id === track.id;
                   return (
-                    <button
+                    <div
                       key={track.id}
-                      onClick={() => selectTrack(track)}
-                      className={cn(
-                        "flex w-full items-center gap-3 rounded-lg p-2 text-left text-sm transition-colors",
-                        isCurrent
-                          ? "bg-zinc-800 text-white"
-                          : "text-zinc-400 hover:bg-zinc-800/50",
-                      )}
+                      className="flex w-full items-center gap-1"
                     >
-                      {isCurrent && isPlaying ? (
-                        <Volume2 className="h-4 w-4 shrink-0 text-violet-400" />
-                      ) : isCurrent ? (
-                        <Music className="h-4 w-4 shrink-0 text-violet-400" />
-                      ) : track.audioUrl ? (
-                        <Play className="h-4 w-4 shrink-0" />
-                      ) : (
-                        <Music className="h-4 w-4 shrink-0 opacity-40" />
-                      )}
-                      <div className="flex min-w-0 flex-col items-start">
-                        <span className="truncate">{track.name}</span>
-                        {!track.audioUrl && (
-                          <span className="text-[10px] text-zinc-600">
-                            {isRu ? "только текст" : "text only"}
-                          </span>
+                      <button
+                        onClick={() => selectTrack(track)}
+                        className={cn(
+                          "flex flex-1 items-center gap-3 rounded-lg p-2 text-left text-sm transition-colors",
+                          isCurrent
+                            ? "bg-zinc-800 text-white"
+                            : "text-zinc-400 hover:bg-zinc-800/50",
                         )}
-                      </div>
-                    </button>
+                      >
+                        {isCurrent && isPlaying ? (
+                          <Volume2 className="h-4 w-4 shrink-0 text-violet-400" />
+                        ) : isCurrent ? (
+                          <Music className="h-4 w-4 shrink-0 text-violet-400" />
+                        ) : track.audioUrl ? (
+                          <Play className="h-4 w-4 shrink-0" />
+                        ) : (
+                          <Music className="h-4 w-4 shrink-0 opacity-40" />
+                        )}
+                        <div className="flex min-w-0 flex-col items-start">
+                          <span className="truncate">{track.name}</span>
+                          {!track.audioUrl && (
+                            <span className="text-[10px] text-zinc-600">
+                              {isRu ? "только текст" : "text only"}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => handleDeleteTrack(track.id)}
+                        className="shrink-0 rounded p-1 text-zinc-600 transition-colors hover:bg-zinc-800 hover:text-red-400"
+                        title={isRu ? "Удалить" : "Delete"}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   );
                 })}
               </div>

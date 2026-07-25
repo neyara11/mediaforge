@@ -1,10 +1,12 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
-import { Image, Download, SlidersHorizontal, Upload, X, History } from "lucide-react";
+import { Image, Download, SlidersHorizontal, Upload, X, History, Trash2 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import { generateImage } from "../../api/endpoints/images";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
 import { useDefaultModel } from "../../shared/useDefaultModel";
-import { saveGeneration, setSetting, getGenerations } from "../../db";
+import { saveGeneration, setSetting, getGenerations, deleteGeneration } from "../../db";
 
 interface ImageResult {
   id: string;
@@ -69,7 +71,7 @@ export default function ImageStudioPage() {
   useEffect(() => {
     const loadHistory = async () => {
       try {
-        const gens = await getGenerations();
+        const gens = await getGenerations(undefined, "/v1/images");
         console.log(`Loaded ${gens.length} generations from DB`);
         const imageGens = gens.filter(
           (g) => g.endpoint === "/v1/images",
@@ -197,11 +199,33 @@ export default function ImageStudioPage() {
     setLoading(false);
   };
 
-  const handleDownload = (img: ImageResult) => {
-    const link = document.createElement("a");
-    link.download = `mediaforge-${img.id}.png`;
-    link.href = `data:image/png;base64,${img.b64}`;
-    link.click();
+  const handleDownload = async (img: ImageResult) => {
+    try {
+      const defaultName = `mediaforge-${img.id.slice(0, 8)}.png`;
+      const filePath = await save({
+        defaultPath: defaultName,
+        filters: [{ name: "PNG Image", extensions: ["png"] }],
+      });
+      if (filePath) {
+        await invoke("save_base64_file", { base64Data: img.b64, filePath });
+      }
+    } catch (e) {
+      console.error("Download failed:", e);
+    }
+  };
+
+  const handleDeleteResult = async (img: ImageResult) => {
+    const baseId = img.id.includes("_") ? img.id.split("_")[0] : img.id;
+    try {
+      await deleteGeneration(baseId);
+      setResults((prev) => prev.filter((r) => r.id !== img.id));
+      setHistoryImages((prev) => prev.filter((r) => r.id !== img.id));
+      if (selected?.id === img.id) {
+        setSelected(null);
+      }
+    } catch (e) {
+      console.error("Delete failed:", e);
+    }
   };
 
   const handleSelectFromHistory = (img: ImageResult) => {
@@ -328,12 +352,20 @@ export default function ImageStudioPage() {
             <div className="mb-4 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900">
               <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-2">
                 <span className="text-xs text-zinc-500">{selected.model}</span>
-                <button
-                  onClick={() => handleDownload(selected)}
-                  className="rounded p-1 text-zinc-500 hover:text-zinc-300"
-                >
-                  <Download className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => handleDownload(selected)}
+                    className="rounded p-1 text-zinc-500 hover:text-zinc-300"
+                  >
+                    <Download className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteResult(selected)}
+                    className="rounded p-1 text-zinc-500 hover:text-red-400"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
               <div className="flex items-center justify-center p-4">
                 <img
@@ -348,22 +380,29 @@ export default function ImageStudioPage() {
           {results.length > 0 && (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {results.map((img) => (
-                <button
-                  key={img.id}
-                  onClick={() => setSelected(img)}
-                  className={cn(
-                    "overflow-hidden rounded-lg border transition-colors",
-                    selected?.id === img.id
-                      ? "border-violet-500"
-                      : "border-zinc-800 hover:border-zinc-600",
-                  )}
-                >
-                  <img
-                    src={`data:image/png;base64,${img.b64}`}
-                    alt=""
-                    className="aspect-square w-full object-cover"
-                  />
-                </button>
+                <div key={img.id} className="group relative">
+                  <button
+                    onClick={() => setSelected(img)}
+                    className={cn(
+                      "w-full overflow-hidden rounded-lg border transition-colors",
+                      selected?.id === img.id
+                        ? "border-violet-500"
+                        : "border-zinc-800 hover:border-zinc-600",
+                    )}
+                  >
+                    <img
+                      src={`data:image/png;base64,${img.b64}`}
+                      alt=""
+                      className="aspect-square w-full object-cover"
+                    />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteResult(img)}
+                    className="absolute right-1 top-1 rounded bg-zinc-900/80 p-1 text-zinc-500 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
               ))}
             </div>
           )}
@@ -387,22 +426,29 @@ export default function ImageStudioPage() {
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {historyImages.map((img) => (
-                  <button
-                    key={img.id}
-                    onClick={() => handleSelectFromHistory(img)}
-                    className={cn(
-                      "overflow-hidden rounded-lg border transition-colors",
-                      selected?.id === img.id
-                        ? "border-violet-500"
-                        : "border-zinc-800 hover:border-zinc-600",
-                    )}
-                  >
-                    <img
-                      src={`data:image/png;base64,${img.b64}`}
-                      alt=""
-                      className="aspect-square w-full object-cover"
-                    />
-                  </button>
+                  <div key={img.id} className="group relative">
+                    <button
+                      onClick={() => handleSelectFromHistory(img)}
+                      className={cn(
+                        "w-full overflow-hidden rounded-lg border transition-colors",
+                        selected?.id === img.id
+                          ? "border-violet-500"
+                          : "border-zinc-800 hover:border-zinc-600",
+                      )}
+                    >
+                      <img
+                        src={`data:image/png;base64,${img.b64}`}
+                        alt=""
+                        className="aspect-square w-full object-cover"
+                      />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteResult(img)}
+                      className="absolute right-1 top-1 rounded bg-zinc-900/80 p-1 text-zinc-500 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
                 ))}
               </div>
             </>

@@ -79,6 +79,7 @@ pub fn run() {
             commands::db_commands::save_models_cache,
             commands::db_commands::get_setting,
             commands::db_commands::set_setting,
+            commands::db_commands::delete_generation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -26,9 +26,44 @@ pub async fn chat_audio_generate(
     state: State<'_, ApiState>,
     prompt: String,
     model: String,
+    genre: Option<String>,
+    tempo: Option<String>,
+    style: Option<String>,
+    has_lyrics: Option<bool>,
 ) -> Result<String, String> {
+    let style = {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(s) = style.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            parts.push(s.to_string());
+        }
+        if let Some(g) = genre.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            parts.push(g.to_string());
+        }
+        if let Some(t) = tempo.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            parts.push(format!("{} BPM", t));
+        }
+        parts.join(", ")
+    };
+    let style_clause = if style.is_empty() {
+        String::new()
+    } else {
+        format!(" Style: {}.", style)
+    };
+
+    let content = if has_lyrics.unwrap_or(false) {
+        format!(
+            "Perform EXACTLY the following song lyrics. Do not add, remove or reorder sections, do not write your own lyrics, do not extend the song beyond the given sections.{}\n\nLyrics:\n{}",
+            style_clause, prompt
+        )
+    } else {
+        format!(
+            "Write and perform a song.{}\n\nTheme: {}",
+            style_clause, prompt
+        )
+    };
+
     let messages = json!([
-        {"role": "user", "content": prompt}
+        {"role": "user", "content": content}
     ]);
 
     let body = json!({
@@ -39,9 +74,9 @@ pub async fn chat_audio_generate(
     });
 
     let body_str = body.to_string();
-    eprintln!("[Audio SSE] Request model={}, prompt_len={}, body_len={}", model, prompt.len(), body_str.len());
-    let prompt_preview: String = prompt.chars().take(200).collect();
-    eprintln!("[Audio SSE] Prompt preview (first 200 chars): {}", prompt_preview);
+    eprintln!("[Audio SSE] Request model={}, has_lyrics={:?}, prompt_len={}, body_len={}", model, has_lyrics, prompt.len(), body_str.len());
+    let content_preview: String = content.chars().take(300).collect();
+    eprintln!("[Audio SSE] Composed message preview (first 300 chars): {}", content_preview);
 
     let raw = api_post_stream(&state, "/chat/completions", &body_str).await?;
 

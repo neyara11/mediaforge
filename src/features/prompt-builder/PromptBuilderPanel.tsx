@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Sparkles, Wand2, ChevronDown, ChevronUp, Copy, Check } from "lucide-react";
 import { chatCompletion } from "../../api/endpoints/chat";
 import { useDefaultModel } from "../../shared/useDefaultModel";
+import { buildLyricsSystemPrompt } from "../../shared/lyricsPrompt";
 import type { ChatMessage } from "../../api/types";
 
 interface PromptBuilderProps {
@@ -24,11 +25,23 @@ Write the prompt in the SAME LANGUAGE the user used in their input.
 
 Include: scene and action, camera movement, lighting and time of day, style, duration.
 Return ONLY the prompt, no explanations.`,
+};
 
-  lyrics: `You are a songwriter. Create song lyrics based on the user's theme.
-Write the lyrics in the SAME LANGUAGE the user used in their input.
-Structure: [Intro], [Verse 1], [Chorus], [Verse 2], [Chorus], [Bridge], [Chorus], [Outro].
-Return ONLY the lyrics with structure tags, no explanations or markdown.`,
+const getSystemPrompt = (mode: string): string => {
+  if (mode === "lyrics") {
+    // Shared builder keeps this in sync with the Music Studio page and
+    // avoids a hardcoded structure — the user's explicit request wins.
+    return buildLyricsSystemPrompt({
+      lang: "the user's language",
+      genre: "",
+      tempo: "",
+      verses: 2,
+      chorus: true,
+      bridge: false,
+      introOutro: false,
+    });
+  }
+  return SYSTEM_PROMPTS[mode];
 };
 
 export default function PromptBuilder({ mode, onUsePrompt }: PromptBuilderProps) {
@@ -53,7 +66,7 @@ export default function PromptBuilder({ mode, onUsePrompt }: PromptBuilderProps)
     setError(null);
     try {
       const messages: ChatMessage[] = [
-        { role: "system", content: SYSTEM_PROMPTS[mode] },
+        { role: "system", content: getSystemPrompt(mode) },
         { role: "user", content: input },
       ];
       const result = await chatCompletion({

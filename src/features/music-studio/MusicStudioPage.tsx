@@ -6,6 +6,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { chatCompletion, chatAudioGenerate } from "../../api/endpoints/chat";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
+import { buildLyricsSystemPrompt, cleanLyricsTranscript, looksLikeTranscript, stripChordLines } from "../../shared/lyricsPrompt";
 import { useDefaultModel } from "../../shared/useDefaultModel";
 import { saveGeneration, getGenerations, setSetting, deleteGeneration } from "../../db";
 import type { ChatMessage } from "../../api/types";
@@ -15,6 +16,7 @@ interface Track {
   name: string;
   genre: string;
   lyrics: string;
+  transcript?: string;
   audioUrl: string | null;
   audioBase64: string;
   audioFormat: string;
@@ -22,6 +24,7 @@ interface Track {
 
 interface SavedTrackData {
   lyrics: string;
+  transcript?: string;
   audio_base64: string;
   audio_format: string;
 }
@@ -47,6 +50,11 @@ export default function MusicStudioPage() {
   const [prompt, setPrompt] = useState("");
   const [genre, setGenre] = useState("pop");
   const [tempo, setTempo] = useState("120");
+  const [styleText, setStyleText] = useState("");
+  const [verses, setVerses] = useState("2");
+  const [chorus, setChorus] = useState(true);
+  const [bridge, setBridge] = useState(false);
+  const [introOutro, setIntroOutro] = useState(false);
   const [loading, setLoading] = useState(false);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
@@ -155,11 +163,15 @@ export default function MusicStudioPage() {
           }
 
           const trackGenre = reqData.genre || "pop";
+          // Legacy records may hold a raw performance transcript (with
+          // [[A0]] / [0.0:] / [:] markup) in the lyrics field — clean it.
+          const rawLyrics = trackData?.lyrics || "";
           const loadedTrack: Track = {
             id: gen.id,
             name: `Track ${loadedTracks.length + 1}`,
             genre: trackGenre,
-            lyrics: trackData?.lyrics || "",
+            lyrics: looksLikeTranscript(rawLyrics) ? cleanLyricsTranscript(rawLyrics) : rawLyrics,
+            transcript: trackData?.transcript,
             audioUrl,
             audioBase64,
             audioFormat,
@@ -305,11 +317,15 @@ export default function MusicStudioPage() {
       const messages: ChatMessage[] = [
         {
           role: "system",
-          content: `You are a songwriter. Create song lyrics in ${lang} based on the user's theme.
-Write the lyrics in the user's language.
-Structure: [Intro], [Verse 1], [Chorus], [Verse 2], [Chorus], [Bridge], [Chorus], [Outro].
-Return ONLY the lyrics with structure tags, no explanations, no markdown.
-Genre: ${genre}, Tempo: ${tempo}`,
+          content: buildLyricsSystemPrompt({
+            lang,
+            genre,
+            tempo,
+            verses: parseInt(verses) || 2,
+            chorus,
+            bridge,
+            introOutro,
+          }),
         },
         { role: "user", content: prompt },
       ];
@@ -332,8 +348,20 @@ Genre: ${genre}, Tempo: ${tempo}`,
     setLoading(true);
     setError(null);
     try {
-      const trackPrompt = lyrics || prompt;
-      const result = await chatAudioGenerate(trackPrompt, audioModel.defaultModel);
+      // The lyrics field is the single source of truth: when the user wrote
+      // or edited lyrics, the model must perform exactly them. The returned
+      // transcript never overwrites the field.
+      const userLyrics = lyrics.trim();
+      // Chord-only lines (Am, G7, Dm ...) are stripped from the audio
+      // payload — the model would sing the chord letters aloud. The lyrics
+      // field itself keeps them untouched.
+      const trackPrompt = (userLyrics ? stripChordLines(userLyrics) : "") || prompt;
+      const result = await chatAudioGenerate(trackPrompt, audioModel.defaultModel, {
+        genre,
+        tempo,
+        style: styleText,
+        hasLyrics: !!userLyrics,
+      });
 
       let audioUrl: string | null = null;
       if (result.audio_base64) {
@@ -342,6 +370,10 @@ Genre: ${genre}, Tempo: ${tempo}`,
         audioUrl = URL.createObjectURL(blob);
         audioUrlsRef.current.add(audioUrl);
       }
+
+      // When the model wrote the lyrics itself (field was empty), show the
+      // cleaned transcript. Otherwise keep the user's text untouched.
+      const finalLyrics = userLyrics || cleanLyricsTranscript(result.lyrics);
 
       const trackId = generateId();
       const maxNum = tracks.reduce((max, t) => {
@@ -352,7 +384,8 @@ Genre: ${genre}, Tempo: ${tempo}`,
         id: trackId,
         name: `Track ${maxNum + 1} — ${genre}`,
         genre,
-        lyrics: result.lyrics,
+        lyrics: finalLyrics,
+        transcript: result.lyrics || undefined,
         audioUrl,
         audioBase64: result.audio_base64,
         audioFormat: result.audio_format,
@@ -360,7 +393,9 @@ Genre: ${genre}, Tempo: ${tempo}`,
       setTracks((prev) => [newTrack, ...prev]);
       currentTrackRef.current = newTrack;
       setCurrentTrack(newTrack);
-      setLyrics(result.lyrics);
+      if (!userLyrics) {
+        setLyrics(finalLyrics);
+      }
       setCurrentTime(0);
       setDuration(0);
 
@@ -370,7 +405,8 @@ Genre: ${genre}, Tempo: ${tempo}`,
       }
 
       const responseJson = JSON.stringify({
-        lyrics: result.lyrics,
+        lyrics: finalLyrics,
+        transcript: result.lyrics,
         audio_base64: result.audio_base64,
         audio_format: result.audio_format,
       });
@@ -474,6 +510,55 @@ Genre: ${genre}, Tempo: ${tempo}`,
               placeholder="BPM"
               className="w-16 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none focus:border-violet-500"
             />
+            <input
+              value={styleText}
+              onChange={(e) => setStyleText(e.target.value)}
+              placeholder={isRu ? "Стиль: акустика, мужской вокал..." : "Style: acoustic, male vocal..."}
+              title={isRu
+                ? "Свободное описание стиля для музыкальной модели. Имена исполнителей могут отфильтровываться."
+                : "Free-form style description for the music model. Artist names may be filtered."}
+              className="w-56 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none focus:border-violet-500"
+            />
+            <label className="flex items-center gap-1 text-zinc-500">
+              {isRu ? "Куплетов:" : "Verses:"}
+              <select
+                value={verses}
+                onChange={(e) => setVerses(e.target.value)}
+                className="rounded border border-zinc-700 bg-zinc-800 px-1 py-1 text-xs text-white outline-none"
+              >
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-1 text-zinc-500">
+              <input
+                type="checkbox"
+                checked={chorus}
+                onChange={(e) => setChorus(e.target.checked)}
+                className="accent-violet-500"
+              />
+              {isRu ? "Припев" : "Chorus"}
+            </label>
+            <label className="flex items-center gap-1 text-zinc-500">
+              <input
+                type="checkbox"
+                checked={bridge}
+                onChange={(e) => setBridge(e.target.checked)}
+                className="accent-violet-500"
+              />
+              {isRu ? "Бридж" : "Bridge"}
+            </label>
+            <label className="flex items-center gap-1 text-zinc-500">
+              <input
+                type="checkbox"
+                checked={introOutro}
+                onChange={(e) => setIntroOutro(e.target.checked)}
+                className="accent-violet-500"
+              />
+              {isRu ? "Интро/Аутро" : "Intro/Outro"}
+            </label>
             <button
               onClick={handleGenerateLyrics}
               disabled={!prompt.trim() || loading}

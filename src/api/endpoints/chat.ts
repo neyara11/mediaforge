@@ -9,11 +9,27 @@ export async function chatCompletion(params: ChatCompletionParams): Promise<stri
   });
 }
 
+export interface AudioGenerateOptions {
+  genre?: string;
+  tempo?: string;
+  style?: string;
+  hasLyrics?: boolean;
+}
+
 export async function chatAudioGenerate(
   prompt: string,
-  model: string
+  model: string,
+  opts?: AudioGenerateOptions
 ): Promise<AudioGenerationResult> {
-  const raw = await apiInvoke<string>("chat_audio_generate", { prompt, model });
+  const raw = await apiInvoke<string>("chat_audio_generate", {
+    prompt,
+    model,
+    genre: opts?.genre ?? null,
+    tempo: opts?.tempo ?? null,
+    style: opts?.style ?? null,
+    // Tauri v2 binds snake_case Rust params from camelCase JS keys.
+    hasLyrics: opts?.hasLyrics ?? null,
+  });
   const parsed = JSON.parse(raw);
   return {
     lyrics: parsed.lyrics || "",

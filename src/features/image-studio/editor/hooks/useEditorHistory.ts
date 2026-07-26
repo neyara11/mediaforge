@@ -5,7 +5,7 @@ import { isHistorySuspended } from "../utils/historySuspend";
 const MAX_HISTORY = 50;
 
 /** Custom object properties that must survive undo/redo serialization. */
-const EXTRA_SERIALIZED_PROPS = ["isMask"];
+const EXTRA_SERIALIZED_PROPS: string[] = [];
 
 interface UseEditorHistoryReturn {
   undo: () => void;

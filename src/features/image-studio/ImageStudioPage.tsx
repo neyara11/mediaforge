@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Image, Download, SlidersHorizontal, Upload, X, History, Trash2, Pencil } from "lucide-react";
+import { Image, Download, SlidersHorizontal, Upload, X, History, Trash2, Pencil, Paintbrush } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { useNavigate } from "react-router-dom";
@@ -355,9 +355,17 @@ export default function ImageStudioPage() {
             <button
               onClick={handleGenerate}
               disabled={!prompt.trim() || loading}
-              className="ml-auto rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? t("studio.generating") : t("studio.generate")}
+            </button>
+            <button
+              onClick={() => navigate("/image-studio/editor")}
+              className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 transition-colors hover:border-violet-500 hover:text-white"
+              title={t("studio.openEditor")}
+            >
+              <Paintbrush className="mr-1 inline-block h-4 w-4" />
+              {t("studio.openEditor")}
             </button>
           </div>
         </div>

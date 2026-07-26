@@ -3,6 +3,7 @@ import {
   Redo2,
   Save,
   FolderOpen,
+  FileInput,
   Download,
   ZoomIn,
   ZoomOut,
@@ -15,7 +16,6 @@ import {
   Circle,
   Minus,
   Type,
-  Droplets,
   Lasso,
   Crop,
 } from "lucide-react";
@@ -45,6 +45,7 @@ interface EditorToolbarProps {
   onRedo: () => void;
   onSave: () => void;
   onOpen: () => void;
+  onLoadProject: () => void;
   onExport: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -63,7 +64,6 @@ const toolIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   line: Minus,
   text: Type,
   lasso: Lasso,
-  mask: Droplets,
   crop: Crop,
 };
 
@@ -79,6 +79,7 @@ export default function EditorToolbar({
   onRedo,
   onSave,
   onOpen,
+  onLoadProject,
   onExport,
   onZoomIn,
   onZoomOut,
@@ -134,12 +135,6 @@ export default function EditorToolbar({
           <span className="text-xs text-zinc-500">
             {settings.brushSize}px
           </span>
-        </div>
-      )}
-
-      {tool === "mask" && (
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="text-xs text-zinc-500">{tr("toolbar.maskHint")}</span>
         </div>
       )}
 
@@ -267,6 +262,14 @@ export default function EditorToolbar({
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
       >
         <FolderOpen className="h-4 w-4" />
+      </button>
+
+      <button
+        onClick={onLoadProject}
+        title={tr("toolbar.loadProject")}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+      >
+        <FileInput className="h-4 w-4" />
       </button>
 
       <button

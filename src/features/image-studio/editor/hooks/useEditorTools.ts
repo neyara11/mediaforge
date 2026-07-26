@@ -9,8 +9,7 @@ export type EditorTool =
   | "rect"
   | "ellipse"
   | "line"
-  | "lasso"
-  | "mask";
+  | "lasso";
 
 export interface ToolSettings {
   brushSize: number;
@@ -52,7 +51,6 @@ const TOOLS: { value: EditorTool; labelKey: string; shortcut: string }[] = [
   { value: "ellipse", labelKey: "tools.ellipse", shortcut: "O" },
   { value: "line", labelKey: "tools.line", shortcut: "I" },
   { value: "lasso", labelKey: "tools.lasso", shortcut: "L" },
-  { value: "mask", labelKey: "tools.mask", shortcut: "M" },
 ];
 
 export function useEditorTools(): UseEditorToolsReturn {

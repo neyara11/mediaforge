@@ -37,6 +37,7 @@ function AppRoutes() {
         <Route path="/" element={<Navigate to="/image-studio" replace />} />
         <Route path="/image-studio" element={<ImageStudioPage />} />
         <Route path="/image-studio/editor/:genId" element={<ErrorBoundary><ImageEditorPage /></ErrorBoundary>} />
+        <Route path="/image-studio/editor" element={<ErrorBoundary><ImageEditorPage /></ErrorBoundary>} />
         <Route path="/speech-lab" element={<SpeechLabPage />} />
         <Route path="/video-studio" element={<VideoStudioPage />} />
         <Route path="/music-studio" element={<MusicStudioPage />} />

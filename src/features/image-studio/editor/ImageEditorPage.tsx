@@ -3,10 +3,10 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { save, open } from "@tauri-apps/plugin-dialog";
-import { Point, Rect, FabricImage } from "fabric";
+import { Point, FabricImage } from "fabric";
 import { FolderOpen } from "lucide-react";
 import { getGenerations } from "../../../db";
-import { canvasToBase64, extractMaskFromCanvas, createFullMask, compositeMaskOverlay, loadImageElement, getNativeResolutionMultiplier } from "./utils/canvasExport";
+import { canvasToBase64, createFullMask, extractFeatheredRegion, loadImageElement, getNativeResolutionMultiplier } from "./utils/canvasExport";
 import { resetFilters, applyFiltersToObject } from "./utils/filterApply";
 import type { FilterState } from "./utils/filterApply";
 import { useFabricCanvas } from "./hooks/useFabricCanvas";
@@ -24,7 +24,6 @@ import { enableTextTool, disableTextTool, updateTextStyle } from "./tools/textTo
 import { enableShapeTool, disableShapeTool } from "./tools/shapeTool";
 import { enableCropMode, disableCropMode, getCropRect } from "./tools/cropTool";
 import { enableLasso, disableLasso } from "./tools/lassoTool";
-import { enableMaskMode, disableMaskMode, getMaskObjects, clearMask } from "./tools/maskTool";
 
 /** Human-readable text for any thrown value (Error, string, DOM Event...). */
 function errorText(e: unknown): string {
@@ -97,7 +96,6 @@ export default function ImageEditorPage() {
     disableShapeTool(canvas);
     disableCropMode(canvas);
     disableLasso(canvas);
-    disableMaskMode(canvas);
   }, [canvas]);
 
   const activateTool = useCallback(
@@ -147,10 +145,6 @@ export default function ImageEditorPage() {
         case "lasso":
           canvas.selection = false;
           enableLasso(canvas, () => {});
-          break;
-        case "mask":
-          canvas.selection = false;
-          enableMaskMode(canvas, s.brushSize);
           break;
       }
     },
@@ -252,7 +246,6 @@ export default function ImageEditorPage() {
       o: "ellipse",
       i: "line",
       l: "lasso",
-      m: "mask",
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (isEditableTarget(e)) return;
@@ -386,14 +379,15 @@ export default function ImageEditorPage() {
             if (left + width > imgRight) { width = imgRight - left; }
             if (top + height > imgBottom) { height = imgBottom - top; }
           }
-          const size = Math.min(width, height);
-          if (size < 4) {
+          if (width < 4 || height < 4) {
             setError(t("editor.regionOutside"));
             setLoading(false);
             return;
           }
-          width = size;
-          height = size;
+
+          // Remove the crop selection frame BEFORE exporting, otherwise it
+          // would be baked into the image sent to the model
+          disableCropMode(canvas);
 
           const fullB64 = canvasToBase64(canvas, "png");
           const hCanvas = document.createElement("canvas");
@@ -403,15 +397,15 @@ export default function ImageEditorPage() {
           const bgImg = await loadImageElement(`data:image/png;base64,${fullB64}`);
           hCtx.drawImage(bgImg, 0, 0);
           hCtx.fillStyle = "rgba(0, 255, 100, 0.12)";
-          hCtx.fillRect(left, top, size, size);
+          hCtx.fillRect(left, top, width, height);
           hCtx.strokeStyle = "rgba(0, 255, 100, 0.5)";
           hCtx.lineWidth = 2;
-          hCtx.strokeRect(left, top, size, size);
+          hCtx.strokeRect(left, top, width, height);
           const highlightedB64 = hCanvas.toDataURL("image/png").replace(/^data:image\/\w+;base64,/, "");
 
           const result = await invoke<string>("edit_region", {
             imageB64: highlightedB64,
-            prompt: prompt || "Regenerate only the green-bordered square area. Match surrounding colors, lighting and style exactly. Keep everything outside the square completely unchanged.",
+            prompt: prompt || "Regenerate only the green-bordered rectangular area. Match surrounding colors, lighting and style exactly. Keep everything outside the rectangle completely unchanged.",
             model: defaultModel,
           });
           const parsed = JSON.parse(result);
@@ -422,49 +416,34 @@ export default function ImageEditorPage() {
             return;
           }
 
+          // Cut the edited region out of the result (the API may return a
+          // different resolution — scale factors map canvas coords onto it)
+          // and insert it as a separate layer with feathered edges, so no
+          // rectangular seam is visible and all user layers stay untouched.
           const resultFullImg = await loadImageElement(`data:image/png;base64,${resultB64}`);
           const canvasW = canvas.getWidth();
           const canvasH = canvas.getHeight();
           const sx = resultFullImg.width / canvasW;
           const sy = resultFullImg.height / canvasH;
-          const srcX = Math.floor(left * sx);
-          const srcY = Math.floor(top * sy);
-          const srcW = Math.floor(size * sx + 0.5);
-          const srcH = Math.floor(size * sy + 0.5);
-          const extractSize = Math.min(srcW, srcH);
-          const extractCanvas = document.createElement("canvas");
-          extractCanvas.width = extractSize;
-          extractCanvas.height = extractSize;
-          const extCtx = extractCanvas.getContext("2d")!;
-          extCtx.imageSmoothingEnabled = false;
-          extCtx.drawImage(resultFullImg, srcX, srcY, extractSize, extractSize, 0, 0, extractSize, extractSize);
-          const extractedB64 = extractCanvas.toDataURL("image/png").replace(/^data:image\/\w+;base64,/, "");
+          const srcX = Math.max(0, Math.round(left * sx));
+          const srcY = Math.max(0, Math.round(top * sy));
+          const srcW = Math.min(resultFullImg.width - srcX, Math.round(width * sx));
+          const srcH = Math.min(resultFullImg.height - srcY, Math.round(height * sy));
+          if (srcW < 4 || srcH < 4) {
+            setError(t("editor.regionTooSmall"));
+            setLoading(false);
+            return;
+          }
+          const feather = Math.max(6, Math.round(Math.min(srcW, srcH) * 0.06));
+          const patchB64 = extractFeatheredRegion(resultFullImg, srcX, srcY, srcW, srcH, feather);
 
-          disableCropMode(canvas);
-
-          const guideRect = new Rect({
-            left,
-            top,
-            width: size,
-            height: size,
-            fill: "rgba(139, 92, 246, 0.1)",
-            stroke: "#8b5cf6",
-            strokeWidth: 1,
-            strokeDashArray: [6, 3],
-            selectable: true,
-            evented: true,
-            name: "region-guide",
-          });
-          canvas.add(guideRect);
-
-          const dataUrl = `data:image/png;base64,${extractedB64}`;
-          const genImg = await FabricImage.fromURL(dataUrl);
+          const genImg = await FabricImage.fromURL(`data:image/png;base64,${patchB64}`);
           if (genImg) {
             genImg.set({
               left,
               top,
-              scaleX: size / (genImg.width || 1),
-              scaleY: size / (genImg.height || 1),
+              scaleX: width / (genImg.width || 1),
+              scaleY: height / (genImg.height || 1),
               name: "region-result",
             });
             canvas.add(genImg);
@@ -473,49 +452,6 @@ export default function ImageEditorPage() {
           canvas.renderAll();
           setTool("select");
           pushState();
-        } else if (type === "inpaint") {
-          const maskObjects = getMaskObjects(canvas);
-          if (maskObjects.length === 0) {
-            setError(t("editor.maskFirst"));
-            setLoading(false);
-            return;
-          }
-
-          // Extract mask BEFORE hiding objects
-          const maskData = await extractMaskFromCanvas(canvas, maskObjects);
-          if (!maskData) {
-            setError(t("editor.maskExtractFailed"));
-            setLoading(false);
-            return;
-          }
-
-          // Hide mask, export clean canvas as PNG (lossless)
-          maskObjects.forEach((obj: any) => obj.set({ visible: false }));
-          canvas.renderAll();
-          const cleanB64 = canvasToBase64(canvas, "png");
-          maskObjects.forEach((obj: any) => obj.set({ visible: true }));
-          canvas.renderAll();
-
-          const overlayedB64 = await compositeMaskOverlay(cleanB64, maskData.compositeElement);
-
-          const result = await invoke<string>("inpaint_image", {
-            imageB64: overlayedB64,
-            maskB64: maskData.alphaB64,
-            prompt: prompt || "Regenerate only the green-highlighted areas. Keep everything else exactly the same. Blend seamlessly.",
-            model: defaultModel,
-          });
-          const parsed = JSON.parse(result);
-          const resultB64 = parsed?.data?.[0]?.b64_json;
-          console.log("[inpaint] resultB64 length:", resultB64?.length, "first 50:", resultB64?.substring(0, 50));
-          if (resultB64) {
-            await loadImage(resultB64);
-            console.log("[inpaint] loadImage completed, canvas objects:", canvas.getObjects().length);
-            clearMask(canvas);
-            pushState();
-          } else {
-            console.log("[inpaint] no b64_json in response, full result:", result.substring(0, 300));
-            setError("API: " + (parsed?.error?.message || result.substring(0, 200)));
-          }
         } else if (type === "outpaint") {
           const imageB64 = canvasToBase64(canvas, "png", 1, getNativeResolutionMultiplier(canvas));
           const result = await invoke<string>("generative_expand", {
@@ -651,6 +587,38 @@ export default function ImageEditorPage() {
     setLoading(false);
   }, [loadImage, pushState, clearHistory, t]);
 
+  const handleLoadProject = useCallback(async () => {
+    try {
+      const selected = await open({
+        filters: [{ name: "MediaForge Project", extensions: ["mforge"] }],
+        multiple: false,
+      });
+      if (!selected) return;
+      setLoading(true);
+      const jsonStr = await invoke<string>("load_editor_project", { filePath: selected });
+      const projectData = JSON.parse(jsonStr);
+      if (!projectData.version || !projectData.canvas) {
+        setError(t("editor.loadProjectFailed", { error: "Invalid project file" }));
+        setLoading(false);
+        return;
+      }
+      canvas!.loadFromJSON(projectData.canvas, () => {
+        canvas!.renderAll();
+        if (projectData.filters) {
+          setFilters(projectData.filters);
+        }
+        setImageLoaded(true);
+        clearHistory();
+        setTimeout(() => pushState(), 100);
+        setLoading(false);
+      });
+    } catch (e) {
+      console.error("Load project failed:", e);
+      setError(t("editor.loadProjectFailed", { error: errorText(e) }));
+      setLoading(false);
+    }
+  }, [canvas, pushState, clearHistory, t]);
+
   const handleToolChange = useCallback(
     (newTool: EditorTool) => {
       setTool(newTool);
@@ -672,6 +640,7 @@ export default function ImageEditorPage() {
         onRedo={redo}
         onSave={handleSave}
         onOpen={handleOpen}
+        onLoadProject={handleLoadProject}
         onExport={handleExport}
         onZoomIn={() => {
           const z = Math.min(getZoom() * 1.2, 10);
@@ -725,10 +694,7 @@ export default function ImageEditorPage() {
             </div>
           )}
 
-          <EditorCanvas
-            canvasRef={canvasRef}
-            isMaskMode={tool === "mask"}
-          />
+          <EditorCanvas canvasRef={canvasRef} />
         </div>
 
         {showSidebar && (

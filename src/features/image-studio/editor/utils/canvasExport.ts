@@ -1,4 +1,4 @@
-import { Canvas as FabricCanvas, StaticCanvas, FabricImage } from "fabric";
+import { Canvas as FabricCanvas, FabricImage } from "fabric";
 
 /**
  * Render the canvas to an element with the viewport transform (zoom/pan)
@@ -94,146 +94,48 @@ export function createFullMask(canvas: FabricCanvas, multiplier = 1): string {
   return el.toDataURL("image/png").replace(/^data:image\/\w+;base64,/, "");
 }
 
-export async function compositeMaskOverlay(
-  imageB64: string,
-  maskElement: HTMLCanvasElement,
-): Promise<string> {
-  const img = await loadImageElement(`data:image/png;base64,${imageB64}`);
-  const width = maskElement.width;
-  const height = maskElement.height;
+/**
+ * Cut a rectangular region out of a source image and feather its edges:
+ * the patch alpha fades to transparent over ~featherPx at the borders, so
+ * placing it over the original image produces no visible rectangular seam.
+ * Returns base64 PNG (no data-URL prefix).
+ */
+export function extractFeatheredRegion(
+  img: HTMLImageElement,
+  srcX: number,
+  srcY: number,
+  srcW: number,
+  srcH: number,
+  featherPx: number,
+): string {
+  const patch = document.createElement("canvas");
+  patch.width = srcW;
+  patch.height = srcH;
+  const ctx = patch.getContext("2d");
+  if (!ctx) return "";
+  ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
 
-  const out = document.createElement("canvas");
-  out.width = width;
-  out.height = height;
-  const ctx = out.getContext("2d");
-  if (!ctx) return imageB64;
-
-  ctx.drawImage(img, 0, 0, width, height);
-
-  const maskCtx = maskElement.getContext("2d");
-  if (!maskCtx) return imageB64;
-  const maskData = maskCtx.getImageData(0, 0, width, height);
-  const mPx = maskData.data;
-
-  const overlay = ctx.getImageData(0, 0, width, height);
-  const oPx = overlay.data;
-
-  for (let i = 0; i < oPx.length; i += 4) {
-    const isMasked = mPx[i] > 128 && mPx[i + 1] > 128 && mPx[i + 2] > 128;
-    if (isMasked) {
-      oPx[i] = Math.min(255, oPx[i] + 80);
-      oPx[i + 1] = Math.min(255, oPx[i + 1] + 160);
-      oPx[i + 2] = Math.min(255, oPx[i + 2] + 80);
+  if (featherPx > 0) {
+    const mask = document.createElement("canvas");
+    mask.width = srcW;
+    mask.height = srcH;
+    const mCtx = mask.getContext("2d");
+    if (mCtx) {
+      // Blurring a full-size white rect fades its edges inward (the outer
+      // spill is clipped by the mask canvas bounds)
+      mCtx.fillStyle = "#000000";
+      mCtx.fillRect(0, 0, srcW, srcH);
+      mCtx.filter = `blur(${featherPx}px)`;
+      mCtx.fillStyle = "#ffffff";
+      mCtx.fillRect(0, 0, srcW, srcH);
+      mCtx.filter = "none";
+      ctx.globalCompositeOperation = "destination-in";
+      ctx.drawImage(mask, 0, 0);
+      ctx.globalCompositeOperation = "source-over";
     }
   }
 
-  ctx.putImageData(overlay, 0, 0);
-  return out.toDataURL("image/png").replace(/^data:image\/\w+;base64,/, "");
-}
-
-export async function extractMaskFromCanvas(
-  canvas: FabricCanvas,
-  maskObjects: any[],
-): Promise<{ alphaB64: string; compositeElement: HTMLCanvasElement } | null> {
-  if (maskObjects.length === 0) return null;
-
-  const width = canvas.getWidth();
-  const height = canvas.getHeight();
-
-  const tempCanvas = new StaticCanvas(document.createElement("canvas"), {
-    width,
-    height,
-    enableRetinaScaling: false,
-  });
-
-  const whiteObjects = maskObjects.map((obj: any) => ({
-    ...obj.toObject(),
-    fill: "#ffffff",
-    stroke: "#ffffff",
-  }));
-  await tempCanvas.loadFromJSON({ objects: whiteObjects });
-  tempCanvas.renderAll();
-  const maskDataUrl = tempCanvas.toDataURL({ format: "png", multiplier: 1, enableRetinaScaling: false });
-  await tempCanvas.dispose();
-
-  const el = document.createElement("canvas");
-  el.width = width;
-  el.height = height;
-  const ctx = el.getContext("2d");
-  if (!ctx) return null;
-
-  const maskImg = await loadImageElement(maskDataUrl);
-  ctx.drawImage(maskImg, 0, 0);
-  const imageData = ctx.getImageData(0, 0, width, height);
-  const pixels = imageData.data;
-  for (let i = 0; i < pixels.length; i += 4) {
-    const brightness = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
-    if (brightness > 128) {
-      pixels[i] = 255;
-      pixels[i + 1] = 255;
-      pixels[i + 2] = 255;
-    } else {
-      pixels[i] = 0;
-      pixels[i + 1] = 0;
-      pixels[i + 2] = 0;
-    }
-    pixels[i + 3] = 255;
-  }
-  ctx.putImageData(imageData, 0, 0);
-
-  return {
-    alphaB64: el.toDataURL("image/png").replace(/^data:image\/\w+;base64,/, ""),
-    compositeElement: el,
-  };
-}
-
-export async function compositeWithMask(
-  originalB64: string,
-  resultB64: string,
-  maskCanvas: HTMLCanvasElement,
-  canvasWidth: number,
-  canvasHeight: number,
-): Promise<string> {
-  const originalImg = await loadImageElement(`data:image/png;base64,${originalB64}`);
-  const resultImg = await loadImageElement(`data:image/png;base64,${resultB64}`);
-
-  const out = document.createElement("canvas");
-  out.width = canvasWidth;
-  out.height = canvasHeight;
-  const outCtx = out.getContext("2d");
-  if (!outCtx) return resultB64;
-
-  outCtx.drawImage(resultImg, 0, 0);
-  const resultData = outCtx.getImageData(0, 0, canvasWidth, canvasHeight);
-
-  const tmp = document.createElement("canvas");
-  tmp.width = canvasWidth;
-  tmp.height = canvasHeight;
-  const tmpCtx = tmp.getContext("2d");
-  if (!tmpCtx) return resultB64;
-  tmpCtx.drawImage(originalImg, 0, 0);
-  const originalData = tmpCtx.getImageData(0, 0, canvasWidth, canvasHeight);
-
-  const maskCtx = maskCanvas.getContext("2d");
-  if (!maskCtx) return resultB64;
-  const maskData = maskCtx.getImageData(0, 0, canvasWidth, canvasHeight);
-
-  const rPx = resultData.data;
-  const oPx = originalData.data;
-  const mPx = maskData.data;
-
-  for (let i = 0; i < rPx.length; i += 4) {
-    const alpha = mPx[i + 3];
-    if (alpha <= 128) {
-      // Outside the mask: keep the original pixel
-      rPx[i] = oPx[i];
-      rPx[i + 1] = oPx[i + 1];
-      rPx[i + 2] = oPx[i + 2];
-    }
-  }
-
-  outCtx.putImageData(resultData, 0, 0);
-  return out.toDataURL("image/png").replace(/^data:image\/\w+;base64,/, "");
+  return patch.toDataURL("image/png").replace(/^data:image\/\w+;base64,/, "");
 }
 
 export async function compositeResult(

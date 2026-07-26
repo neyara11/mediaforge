@@ -9,6 +9,7 @@
     "readRefError": "Failed to read reference image",
     "saveError": "Save failed: {{error}}",
     "edit": "Edit",
+    "openEditor": "Open Editor",
     "emptyHint": "Enter a prompt and press Generate",
     "history": "History",
     "historyCount": "{{count}} images",
@@ -23,14 +24,14 @@
     "rect": "Rectangle",
     "ellipse": "Ellipse",
     "line": "Line",
-    "lasso": "Lasso",
-    "mask": "Mask"
+    "lasso": "Lasso"
   },
   "toolbar": {
     "undo": "Undo (Ctrl+Z)",
     "redo": "Redo (Ctrl+Shift+Z)",
     "save": "Save (Ctrl+S)",
     "openImage": "Open Image",
+    "loadProject": "Load Project",
     "exportPng": "Export PNG",
     "zoomIn": "Zoom In",
     "zoomOut": "Zoom Out",
@@ -41,8 +42,7 @@
     "brushColor": "Brush color",
     "fillColor": "Fill color",
     "strokeColor": "Stroke color",
-    "strokeWidth": "Stroke width",
-    "maskHint": "50px brush — paint the area for inpainting"
+    "strokeWidth": "Stroke width"
   },
   "sidebar": {
     "filters": "Filters",
@@ -61,7 +61,7 @@
   "ai": {
     "title": "AI tools",
     "model": "Model",
-    "hint": "Inpaint: select Mask, paint an area, enter a prompt, Apply",
+    "hint": "Region Edit: select an area with the Crop tool, enter a prompt, Apply",
     "promptPlaceholder": "Describe what to generate in the selected area...",
     "processing": "Processing...",
     "apply": "Apply {{label}}",
@@ -69,8 +69,6 @@
     "styleRefRemove": "Remove reference",
     "regionEdit": "Region Edit",
     "regionEditDesc": "Select an area (Crop) and enter a prompt",
-    "inpaint": "Inpaint",
-    "inpaintDesc": "Fill the painted area (Mask)",
     "outpaint": "Outpaint",
     "outpaintDesc": "Extend the image",
     "removeBackground": "Remove Background",
@@ -103,12 +101,11 @@
     "selectRegionFirst": "Select an area with the Crop tool first",
     "regionTooSmall": "The area is too small",
     "regionOutside": "The selected area is outside the image",
-    "maskFirst": "Paint an area for inpainting first (Mask tool)",
-    "maskExtractFailed": "Failed to extract the mask",
     "styleRefRequired": "Choose a style reference",
     "aiFailed": "AI operation failed: {{error}}",
     "exportFailed": "Failed to export the image",
     "saveFailed": "Failed to save the project",
+    "loadProjectFailed": "Failed to load the project: {{error}}",
     "openFailed": "Failed to open the file: {{error}}",
     "chooseImage": "Choose an image to edit",
     "openImage": "Open image",

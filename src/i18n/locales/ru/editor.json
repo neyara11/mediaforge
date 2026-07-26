@@ -9,6 +9,7 @@
     "readRefError": "Failed to read reference image",
     "saveError": "Ошибка сохранения: {{error}}",
     "edit": "Редактировать",
+    "openEditor": "Открыть редактор",
     "emptyHint": "Введите промпт и нажмите Generate",
     "history": "История",
     "historyCount": "{{count}} изобр.",
@@ -23,14 +24,14 @@
     "rect": "Прямоугольник",
     "ellipse": "Эллипс",
     "line": "Линия",
-    "lasso": "Лассо",
-    "mask": "Маска"
+    "lasso": "Лассо"
   },
   "toolbar": {
     "undo": "Отменить (Ctrl+Z)",
     "redo": "Повторить (Ctrl+Shift+Z)",
     "save": "Сохранить (Ctrl+S)",
     "openImage": "Открыть изображение",
+    "loadProject": "Загрузить проект",
     "exportPng": "Экспорт PNG",
     "zoomIn": "Увеличить",
     "zoomOut": "Уменьшить",
@@ -41,8 +42,7 @@
     "brushColor": "Цвет кисти",
     "fillColor": "Цвет заливки",
     "strokeColor": "Цвет обводки",
-    "strokeWidth": "Толщина обводки",
-    "maskHint": "Кисть 50px — закрасьте область для inpainting"
+    "strokeWidth": "Толщина обводки"
   },
   "sidebar": {
     "filters": "Фильтры",
@@ -61,7 +61,7 @@
   "ai": {
     "title": "AI инструменты",
     "model": "Модель",
-    "hint": "Inpaint: выберите Mask, закрасьте область, введите промпт, Apply",
+    "hint": "Region Edit: выделите область инструментом Crop, введите промпт, Apply",
     "promptPlaceholder": "Опишите, что сгенерировать в выделенной области...",
     "processing": "Обработка...",
     "apply": "Apply {{label}}",
@@ -69,8 +69,6 @@
     "styleRefRemove": "Убрать референс",
     "regionEdit": "Region Edit",
     "regionEditDesc": "Выделите область (Crop) и впишите промпт",
-    "inpaint": "Inpaint",
-    "inpaintDesc": "Заполнить закрашенную область (Mask)",
     "outpaint": "Outpaint",
     "outpaintDesc": "Расширить изображение",
     "removeBackground": "Remove Background",
@@ -103,12 +101,11 @@
     "selectRegionFirst": "Сначала выделите область инструментом Crop",
     "regionTooSmall": "Область слишком мала",
     "regionOutside": "Выделенная область за пределами изображения",
-    "maskFirst": "Сначала закрасьте область для inpainting (инструмент Mask)",
-    "maskExtractFailed": "Не удалось извлечь маску",
     "styleRefRequired": "Выберите референс стиля",
     "aiFailed": "AI операция не удалась: {{error}}",
     "exportFailed": "Не удалось экспортировать изображение",
     "saveFailed": "Не удалось сохранить проект",
+    "loadProjectFailed": "Не удалось загрузить проект: {{error}}",
     "openFailed": "Не удалось открыть файл: {{error}}",
     "chooseImage": "Выберите изображение для редактирования",
     "openImage": "Открыть изображение",

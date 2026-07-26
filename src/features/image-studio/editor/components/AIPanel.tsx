@@ -13,7 +13,6 @@ interface AIPanelProps {
 
 const aiTools = [
   { type: "region_edit", labelKey: "ai.regionEdit", descKey: "ai.regionEditDesc", icon: Wand2 },
-  { type: "inpaint", labelKey: "ai.inpaint", descKey: "ai.inpaintDesc", icon: Wand2 },
   { type: "outpaint", labelKey: "ai.outpaint", descKey: "ai.outpaintDesc", icon: Sparkles },
   { type: "remove_background", labelKey: "ai.removeBackground", descKey: "ai.removeBackgroundDesc", icon: Wand2 },
   { type: "upscale", labelKey: "ai.upscale", descKey: "ai.upscaleDesc", icon: Sparkles },
@@ -86,7 +85,7 @@ export default function AIPanel({ onApply, loading, defaultModel, availableModel
       <div className="flex flex-col gap-2">
         {aiTools.map((aitool) => {
           const Icon = aitool.icon;
-          const hasPrompt = aitool.type === "inpaint" || aitool.type === "region_edit";
+          const hasPrompt = aitool.type === "region_edit";
           const isStyleTransfer = aitool.type === "style_transfer";
 
           return (

@@ -1,5 +1,67 @@
 import { Canvas as FabricCanvas, FabricImage } from "fabric";
 
+export interface ExportRegion {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export function getImageExportRegion(canvas: FabricCanvas): ExportRegion {
+  const objects = canvas.getObjects() as any[];
+  const bg = objects.find(
+    (obj) => obj.type === "image" && obj.selectable === false && obj.evented === false,
+  );
+  if (bg) {
+    return {
+      left: bg.left ?? 0,
+      top: bg.top ?? 0,
+      width: (bg.width ?? 0) * Math.abs(bg.scaleX ?? 1),
+      height: (bg.height ?? 0) * Math.abs(bg.scaleY ?? 1),
+    };
+  }
+  if (objects.length > 0) {
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    for (const obj of objects) {
+      const r = obj.getBoundingRect();
+      left = Math.min(left, r.left);
+      top = Math.min(top, r.top);
+      right = Math.max(right, r.left + r.width);
+      bottom = Math.max(bottom, r.top + r.height);
+    }
+    return { left, top, width: right - left, height: bottom - top };
+  }
+  return { left: 0, top: 0, width: canvas.getWidth(), height: canvas.getHeight() };
+}
+
+function exportCroppedDataUrl(
+  canvas: FabricCanvas,
+  region: ExportRegion,
+  format: "png" | "jpeg",
+  quality: number,
+  multiplier: number,
+): string {
+  const originalVt = [...canvas.viewportTransform] as typeof canvas.viewportTransform;
+  const originalBg = canvas.backgroundColor;
+  canvas.viewportTransform = [1, 0, 0, 1, 0, 0];
+  canvas.backgroundColor = "";
+  try {
+    return canvas.toDataURL({
+      format,
+      quality,
+      multiplier,
+      enableRetinaScaling: false,
+      left: region.left,
+      top: region.top,
+      width: region.width,
+      height: region.height,
+    });
+  } finally {
+    canvas.viewportTransform = originalVt;
+    canvas.backgroundColor = originalBg;
+  }
+}
+
 /**
  * Render the canvas to an element with the viewport transform (zoom/pan)
  * temporarily reset, so scene coordinates map 1:1 to output pixels.
@@ -37,6 +99,22 @@ export function canvasToBase64(
   } finally {
     canvas.viewportTransform = originalVt;
   }
+}
+
+export function canvasToBase64Cropped(
+  canvas: FabricCanvas,
+  format?: string,
+  quality?: number,
+  multiplier = 1,
+): string {
+  const region = getImageExportRegion(canvas);
+  const dataUrl = exportCroppedDataUrl(
+    canvas, region,
+    (format ?? "png") as "png" | "jpeg",
+    quality ?? 1,
+    multiplier,
+  );
+  return dataUrl.replace(/^data:image\/\w+;base64,/, "");
 }
 
 /**

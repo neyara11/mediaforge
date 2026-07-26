@@ -6,7 +6,7 @@ import { save, open } from "@tauri-apps/plugin-dialog";
 import { Point, FabricImage } from "fabric";
 import { FolderOpen } from "lucide-react";
 import { getGenerations } from "../../../db";
-import { canvasToBase64, createFullMask, extractFeatheredRegion, loadImageElement, getNativeResolutionMultiplier } from "./utils/canvasExport";
+import { canvasToBase64, canvasToBase64Cropped, createFullMask, extractFeatheredRegion, loadImageElement, getNativeResolutionMultiplier } from "./utils/canvasExport";
 import { resetFilters, applyFiltersToObject } from "./utils/filterApply";
 import type { FilterState } from "./utils/filterApply";
 import { useFabricCanvas } from "./hooks/useFabricCanvas";
@@ -527,7 +527,7 @@ export default function ImageEditorPage() {
   const handleExport = useCallback(async () => {
     if (!canvas) return;
     try {
-      const b64 = canvasToBase64(canvas);
+      const b64 = canvasToBase64Cropped(canvas);
       const filePath = await save({
         defaultPath: "edited-image.png",
         filters: [{ name: "PNG Image", extensions: ["png"] }],
@@ -543,7 +543,7 @@ export default function ImageEditorPage() {
   const handleSave = useCallback(async () => {
     if (!canvas) return;
     try {
-      const b64 = canvasToBase64(canvas);
+      const b64 = canvasToBase64Cropped(canvas);
       const filePath = await save({
         defaultPath: "project.mforge",
         filters: [

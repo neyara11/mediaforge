@@ -1,19 +1,34 @@
+use tauri::Manager;
+use tauri::AppHandle;
 use tauri::State;
 use sqlx::SqlitePool;
 use serde_json::{json, Value};
 use base64::Engine;
 use std::time::Duration;
 
-async fn get_ace_step_url(pool: &SqlitePool) -> Result<String, String> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM user_settings WHERE key = 'ace_step_url'")
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    let url = row
-        .map(|r| r.0)
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "http://localhost:8001".to_string());
-    Ok(url.trim_end_matches('/').to_string())
+async fn get_ace_step_config(pool: &SqlitePool) -> Result<(String, Option<String>), String> {
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT key, value FROM user_settings WHERE key IN ('ace_step_url', 'ace_step_api_key')")
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    let mut url = "http://localhost:8001".to_string();
+    let mut api_key: Option<String> = None;
+    for (k, v) in rows {
+        match k.as_str() {
+            "ace_step_url" if !v.is_empty() => url = v,
+            "ace_step_api_key" if !v.is_empty() => api_key = Some(v),
+            _ => {}
+        }
+    }
+    Ok((url.trim_end_matches('/').to_string(), api_key))
+}
+
+fn with_auth(req: reqwest::RequestBuilder, api_key: &Option<String>) -> reqwest::RequestBuilder {
+    match api_key {
+        Some(key) => req.header("Authorization", format!("Bearer {}", key)),
+        None => req,
+    }
 }
 
 fn parse_wrapper(body: Value) -> Result<Value, String> {
@@ -70,6 +85,9 @@ fn map_http_error(status: reqwest::StatusCode, body_text: &str) -> String {
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
         return "Server busy (queue full)".to_string();
     }
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return "ACE-Step unauthorized: check API key in Settings".to_string();
+    }
     if let Ok(body) = serde_json::from_str::<Value>(body_text) {
         if let Some(detail) = body.get("detail").and_then(|d| d.as_str()) {
             return detail.to_string();
@@ -89,13 +107,12 @@ fn map_http_error(status: reqwest::StatusCode, body_text: &str) -> String {
 pub async fn acestep_health(
     pool: State<'_, SqlitePool>,
 ) -> Result<bool, String> {
-    let url = get_ace_step_url(&pool).await?;
+    let (url, api_key) = get_ace_step_config(&pool).await?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
         .map_err(|e| e.to_string())?;
-    let resp = client
-        .get(format!("{}/health", url))
+    let resp = with_auth(client.get(format!("{}/health", url)), &api_key)
         .send()
         .await
         .map_err(|e| map_reqwest_error(e, &url))?;
@@ -113,13 +130,12 @@ pub async fn acestep_health(
 pub async fn acestep_models(
     pool: State<'_, SqlitePool>,
 ) -> Result<String, String> {
-    let url = get_ace_step_url(&pool).await?;
+    let (url, api_key) = get_ace_step_config(&pool).await?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(|e| e.to_string())?;
-    let resp = client
-        .get(format!("{}/v1/models", url))
+    let resp = with_auth(client.get(format!("{}/v1/models", url)), &api_key)
         .send()
         .await
         .map_err(|e| map_reqwest_error(e, &url))?;
@@ -182,7 +198,7 @@ pub async fn acestep_generate(
     audio_cover_strength: Option<f64>,
     instruction: Option<String>,
 ) -> Result<String, String> {
-    let url = get_ace_step_url(&pool).await?;
+    let (url, api_key) = get_ace_step_config(&pool).await?;
     let use_multipart = src_audio_path.is_some() || reference_audio_path.is_some();
 
     let client = reqwest::Client::builder()
@@ -222,9 +238,7 @@ pub async fn acestep_generate(
         if let Some(s) = audio_cover_strength { form = form.text("audio_cover_strength", s.to_string()); }
         if let Some(ref i) = instruction { form = form.text("instruction", i.clone()); }
 
-        client
-            .post(format!("{}/release_task", url))
-            .multipart(form)
+        with_auth(client.post(format!("{}/release_task", url)).multipart(form), &api_key)
             .send()
             .await
             .map_err(|e| map_reqwest_error(e, &url))?
@@ -254,9 +268,7 @@ pub async fn acestep_generate(
         if let Some(s) = audio_cover_strength { body["audio_cover_strength"] = json!(s); }
         if let Some(ref i) = instruction { body["instruction"] = json!(i); }
 
-        client
-            .post(format!("{}/release_task", url))
-            .json(&body)
+        with_auth(client.post(format!("{}/release_task", url)).json(&body), &api_key)
             .send()
             .await
             .map_err(|e| map_reqwest_error(e, &url))?
@@ -281,17 +293,20 @@ pub async fn acestep_poll(
     pool: State<'_, SqlitePool>,
     task_ids: Vec<String>,
 ) -> Result<String, String> {
-    let url = get_ace_step_url(&pool).await?;
+    let (url, api_key) = get_ace_step_config(&pool).await?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|e| e.to_string())?;
-    let resp = client
-        .post(format!("{}/query_result", url))
-        .json(&json!({ "task_id_list": task_ids }))
-        .send()
-        .await
-        .map_err(|e| map_reqwest_error(e, &url))?;
+    let resp = with_auth(
+        client
+            .post(format!("{}/query_result", url))
+            .json(&json!({ "task_id_list": task_ids })),
+        &api_key,
+    )
+    .send()
+    .await
+    .map_err(|e| map_reqwest_error(e, &url))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
@@ -342,16 +357,16 @@ pub async fn acestep_poll(
 
 #[tauri::command]
 pub async fn acestep_download_audio(
+    app: AppHandle,
     pool: State<'_, SqlitePool>,
     file: String,
 ) -> Result<String, String> {
-    let url = get_ace_step_url(&pool).await?;
+    let (url, api_key) = get_ace_step_config(&pool).await?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
         .build()
         .map_err(|e| e.to_string())?;
-    let resp = client
-        .get(format!("{}{}", url, file))
+    let resp = with_auth(client.get(format!("{}{}", url, file)), &api_key)
         .send()
         .await
         .map_err(|e| map_reqwest_error(e, &url))?;
@@ -362,9 +377,14 @@ pub async fn acestep_download_audio(
     }
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
     let audio_format = if file.contains(".wav") { "wav" } else { "mp3" };
-    let audio_base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let audio_dir = app_dir.join("media").join("audio");
+    std::fs::create_dir_all(&audio_dir).map_err(|e| e.to_string())?;
+    let filename = format!("{}.{}", uuid::Uuid::new_v4(), audio_format);
+    let path = audio_dir.join(&filename);
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
     let result = json!({
-        "audio_base64": audio_base64,
+        "media_path": path.to_string_lossy(),
         "audio_format": audio_format,
     });
     serde_json::to_string(&result).map_err(|e| e.to_string())

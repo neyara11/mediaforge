@@ -110,7 +110,7 @@ export async function aceStepPoll(
 
 export async function aceStepDownloadAudio(
   file: string
-): Promise<{ audio_base64: string; audio_format: string }> {
+): Promise<{ media_path: string; audio_format: string }> {
   const raw = await apiInvoke<string>("acestep_download_audio", { file });
   return JSON.parse(raw);
 }

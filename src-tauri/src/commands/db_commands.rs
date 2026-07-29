@@ -1,4 +1,6 @@
+use tauri::Manager;
 use tauri::State;
+use tauri::AppHandle;
 use sqlx::{FromRow, SqlitePool};
 use serde::{Deserialize, Serialize};
 
@@ -249,13 +251,35 @@ pub async fn set_setting(
 
 #[tauri::command]
 pub async fn delete_generation(
+    app: AppHandle,
     pool: State<'_, SqlitePool>,
     id: String,
 ) -> Result<(), String> {
+    let row: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT media_path FROM generations WHERE id = ?"
+    )
+        .bind(&id)
+        .fetch_optional(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
     sqlx::query("DELETE FROM generations WHERE id = ?")
         .bind(&id)
         .execute(&*pool)
         .await
         .map_err(|e| e.to_string())?;
+
+    if let Some((Some(media_path),)) = row {
+        let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+        if let Ok(canonical) = std::path::Path::new(&media_path).canonicalize() {
+            if canonical.starts_with(&app_dir) {
+                if let Err(e) = std::fs::remove_file(&canonical) {
+                    if e.kind() != std::io::ErrorKind::NotFound {
+                        eprintln!("delete_generation: failed to remove {}: {}", media_path, e);
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }

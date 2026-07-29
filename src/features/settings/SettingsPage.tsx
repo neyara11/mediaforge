@@ -16,6 +16,7 @@ export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>("general");
   const [ffmpegPath, setFfmpegPath] = useState("");
   const [aceStepUrl, setAceStepUrl] = useState("http://localhost:8001");
+  const [aceStepApiKey, setAceStepApiKey] = useState("");
   const [aceStepTesting, setAceStepTesting] = useState(false);
   const [aceStepTestResult, setAceStepTestResult] = useState<boolean | null>(null);
 
@@ -25,6 +26,9 @@ export default function SettingsPage() {
     }).catch(() => {});
     getSetting("ace_step_url").then((v) => {
       if (v) setAceStepUrl(v);
+    }).catch(() => {});
+    getSetting("ace_step_api_key").then((v) => {
+      if (v) setAceStepApiKey(v);
     }).catch(() => {});
   }, []);
 
@@ -37,6 +41,12 @@ export default function SettingsPage() {
     setAceStepUrl(url);
     setAceStepTestResult(null);
     setSetting("ace_step_url", url).catch(() => {});
+  };
+
+  const saveAceStepApiKey = (key: string) => {
+    setAceStepApiKey(key);
+    setAceStepTestResult(null);
+    setSetting("ace_step_api_key", key).catch(() => {});
   };
 
   const testConnection = async () => {
@@ -138,6 +148,15 @@ export default function SettingsPage() {
                   </button>
                 </div>
                 <p className="mt-1 text-xs text-zinc-600">{t("aceStepUrlDesc")}</p>
+                <label className="mb-2 mt-4 block text-sm">{t("aceStepApiKey")}</label>
+                <input
+                  type="password"
+                  value={aceStepApiKey}
+                  onChange={(e) => saveAceStepApiKey(e.target.value)}
+                  placeholder={t("aceStepApiKeyPlaceholder")}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-600 outline-none focus:border-violet-500"
+                />
+                <p className="mt-1 text-xs text-zinc-600">{t("aceStepApiKeyDesc")}</p>
                 {aceStepTestResult === true && (
                   <p className="mt-1 text-xs text-green-400">{t("aceStepTestOk")}</p>
                 )}

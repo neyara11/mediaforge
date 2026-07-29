@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Music, Play, Pause, Sparkles, Volume2, Download, Trash2, ChevronDown, ChevronRight } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { chatCompletion, chatAudioGenerate } from "../../api/endpoints/chat";
 import {
@@ -11,6 +11,7 @@ import {
   aceStepStageAudio,
   aceStepModels,
 } from "../../api/endpoints/acestep";
+import { saveAudioFile, exportMediaFile, migrateAudioToDisk } from "../../api/endpoints/storage";
 import type {
   AceStepTaskType,
   AceStepGenerateParams,
@@ -36,6 +37,7 @@ interface Track {
   genre: string;
   lyrics: string;
   transcript?: string;
+  mediaPath?: string | null;
   audioUrl: string | null;
   audioBase64: string;
   audioFormat: string;
@@ -55,6 +57,10 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
     bytes[i] = binary.charCodeAt(i);
   }
   return new Blob([bytes], { type: mimeType });
+}
+
+function getTrackAudioSrc(track: Track): string | null {
+  return track.mediaPath ? convertFileSrc(track.mediaPath) : track.audioUrl;
 }
 
 function formatTime(seconds: number): string {
@@ -270,6 +276,15 @@ export default function MusicStudioPage() {
 
     (async () => {
       try {
+        const stats = await migrateAudioToDisk().catch(() => null);
+        if (stats) {
+          console.log(`Audio migration: ${stats.migrated} migrated, ${stats.skipped} skipped, ${stats.failed} failed`);
+        }
+      } catch {
+        // migration is best-effort
+      }
+
+      try {
         const generations = await getGenerations(undefined);
         if (cancelled) return;
 
@@ -300,7 +315,12 @@ export default function MusicStudioPage() {
           let audioBase64 = "";
           let audioFormat = "mp3";
 
-          if (trackData?.audio_base64) {
+          const usableMediaPath =
+            gen.mediaPath && !gen.mediaPath.startsWith("blob:") ? gen.mediaPath : null;
+
+          if (usableMediaPath) {
+            audioFormat = trackData?.audio_format || "mp3";
+          } else if (trackData?.audio_base64) {
             audioBase64 = trackData.audio_base64;
             audioFormat = trackData.audio_format || "mp3";
             const mimeType = audioFormat === "wav" ? "audio/wav" : "audio/mpeg";
@@ -329,6 +349,7 @@ export default function MusicStudioPage() {
               genre: "acestep",
               lyrics: looksLikeTranscript(rawLyrics) ? cleanLyricsTranscript(rawLyrics) : rawLyrics,
               transcript: trackData?.transcript,
+              mediaPath: usableMediaPath,
               audioUrl,
               audioBase64,
               audioFormat,
@@ -342,6 +363,7 @@ export default function MusicStudioPage() {
               genre: trackGenre,
               lyrics: looksLikeTranscript(rawLyrics) ? cleanLyricsTranscript(rawLyrics) : rawLyrics,
               transcript: trackData?.transcript,
+              mediaPath: usableMediaPath,
               audioUrl,
               audioBase64,
               audioFormat,
@@ -389,6 +411,10 @@ export default function MusicStudioPage() {
   };
 
   const handleUseCurrentTrack = async () => {
+    if (currentTrack?.mediaPath) {
+      setSrcAudioPath(currentTrack.mediaPath);
+      return;
+    }
     if (!currentTrack?.audioBase64) return;
     try {
       const path = await aceStepStageAudio(currentTrack.audioBase64, currentTrack.audioFormat || "mp3");
@@ -414,7 +440,8 @@ export default function MusicStudioPage() {
 
   const playTrack = useCallback((track: Track) => {
     const audio = audioRef.current;
-    if (!audio || !track.audioUrl) return;
+    const src = getTrackAudioSrc(track);
+    if (!audio || !src) return;
 
     const isSameTrack = currentTrackRef.current?.id === track.id;
     if (isSameTrack && isPlayingRef.current) {
@@ -422,7 +449,7 @@ export default function MusicStudioPage() {
       return;
     }
     if (!isSameTrack || !audio.src) {
-      audio.src = track.audioUrl;
+      audio.src = src;
     }
     audio.play().catch(console.error);
   }, []);
@@ -440,8 +467,9 @@ export default function MusicStudioPage() {
     setCurrentTrack(track);
     setLyrics(track.lyrics);
     setCurrentTime(0);
-    if (track.audioUrl && audio) {
-      audio.src = track.audioUrl;
+    const src = getTrackAudioSrc(track);
+    if (src && audio) {
+      audio.src = src;
       audio.play().catch(console.error);
     } else if (audio) {
       audio.pause();
@@ -459,7 +487,7 @@ export default function MusicStudioPage() {
 
   const handleDownload = useCallback(async () => {
     const track = currentTrackRef.current;
-    if (!track?.audioBase64) return;
+    if (!track || (!track.mediaPath && !track.audioBase64)) return;
 
     const ext = track.audioFormat === "wav" ? "wav" : "mp3";
     const defaultName = `${track.name.replace(/[^a-zA-Zа-яА-Я0-9 _-]/g, "")}.${ext}`;
@@ -473,10 +501,14 @@ export default function MusicStudioPage() {
         }],
       });
       if (filePath) {
-        await invoke("save_base64_file", {
-          base64Data: track.audioBase64,
-          filePath,
-        });
+        if (track.mediaPath) {
+          await exportMediaFile(track.mediaPath, filePath);
+        } else {
+          await invoke("save_base64_file", {
+            base64Data: track.audioBase64,
+            filePath,
+          });
+        }
       }
     } catch (e) {
       console.error("Download failed:", e);
@@ -737,11 +769,6 @@ export default function MusicStudioPage() {
           for (const file of item.files) {
             const audio = await aceStepDownloadAudio(file.file);
 
-            const audioMime = audio.audio_format === "wav" ? "audio/wav" : "audio/mpeg";
-            const blob = base64ToBlob(audio.audio_base64, audioMime);
-            const audioUrl = URL.createObjectURL(blob);
-            audioUrlsRef.current.add(audioUrl);
-
             const stemForName =
               taskType === "extract" ? taskStemMap[item.task_id] : undefined;
             const trackName = stemForName
@@ -757,8 +784,9 @@ export default function MusicStudioPage() {
               genre: "acestep",
               lyrics: looksLikeTranscript(trackLyrics) ? cleanLyricsTranscript(trackLyrics) : trackLyrics,
               transcript: file.lyrics || undefined,
-              audioUrl,
-              audioBase64: audio.audio_base64,
+              mediaPath: audio.media_path,
+              audioUrl: null,
+              audioBase64: "",
               audioFormat: audio.audio_format,
             };
 
@@ -780,13 +808,12 @@ export default function MusicStudioPage() {
                 }),
                 responseJson: JSON.stringify({
                   lyrics: trackLyrics,
-                  audio_base64: audio.audio_base64,
                   audio_format: audio.audio_format,
                   ...(file.metas ? { metas: file.metas } : {}),
                   ...(file.seed_value ? { seed: file.seed_value } : {}),
                 }),
                 status: "completed",
-                mediaPath: null,
+                mediaPath: audio.media_path,
                 mediaType: `audio/${fmt}`,
                 parentId: null,
                 costRub: null,
@@ -820,8 +847,9 @@ export default function MusicStudioPage() {
           setLyrics(firstTrack.lyrics);
           setCurrentTime(0);
           setDuration(0);
-          if (firstTrack.audioUrl && audioRef.current) {
-            audioRef.current.src = firstTrack.audioUrl;
+          const src = getTrackAudioSrc(firstTrack);
+          if (src && audioRef.current) {
+            audioRef.current.src = src;
             audioRef.current.play().catch(console.error);
           }
         }
@@ -858,12 +886,18 @@ export default function MusicStudioPage() {
         hasLyrics: !!userLyrics,
       });
 
+      let mediaPath: string | null = null;
       let audioUrl: string | null = null;
+
       if (result.audio_base64) {
-        const mimeType = result.audio_format === "wav" ? "audio/wav" : "audio/mpeg";
-        const blob = base64ToBlob(result.audio_base64, mimeType);
-        audioUrl = URL.createObjectURL(blob);
-        audioUrlsRef.current.add(audioUrl);
+        try {
+          mediaPath = await saveAudioFile(result.audio_base64, result.audio_format);
+        } catch {
+          const mimeType = result.audio_format === "wav" ? "audio/wav" : "audio/mpeg";
+          const blob = base64ToBlob(result.audio_base64, mimeType);
+          audioUrl = URL.createObjectURL(blob);
+          audioUrlsRef.current.add(audioUrl);
+        }
       }
 
       const finalLyrics = userLyrics || cleanLyricsTranscript(result.lyrics);
@@ -879,8 +913,9 @@ export default function MusicStudioPage() {
         genre,
         lyrics: finalLyrics,
         transcript: result.lyrics || undefined,
+        mediaPath: mediaPath || null,
         audioUrl,
-        audioBase64: result.audio_base64,
+        audioBase64: mediaPath ? "" : result.audio_base64,
         audioFormat: result.audio_format,
       };
       setTracks((prev) => [newTrack, ...prev]);
@@ -892,15 +927,15 @@ export default function MusicStudioPage() {
       setCurrentTime(0);
       setDuration(0);
 
-      if (audioUrl && audioRef.current) {
-        audioRef.current.src = audioUrl;
+      const src = getTrackAudioSrc(newTrack);
+      if (src && audioRef.current) {
+        audioRef.current.src = src;
         audioRef.current.play().catch(console.error);
       }
 
       const responseJson = JSON.stringify({
         lyrics: finalLyrics,
         transcript: result.lyrics,
-        audio_base64: result.audio_base64,
         audio_format: result.audio_format,
       });
 
@@ -913,7 +948,7 @@ export default function MusicStudioPage() {
           requestJson: JSON.stringify({ prompt: trackPrompt, genre, tempo, model: audioModel.defaultModel }),
           responseJson,
           status: "completed",
-          mediaPath: null,
+          mediaPath: mediaPath,
           mediaType: result.audio_base64 ? `audio/${result.audio_format}` : "text/lyrics",
           parentId: null,
           costRub: result.cost,
@@ -931,7 +966,7 @@ export default function MusicStudioPage() {
     setLoading(false);
   };
 
-  const hasAudio = currentTrack?.audioUrl != null;
+  const hasAudio = currentTrack ? getTrackAudioSrc(currentTrack) != null : false;
 
   const acestepCantGenerate =
     taskType === "extract"
@@ -1055,7 +1090,7 @@ export default function MusicStudioPage() {
                     >
                       {t("form.chooseFile")}
                     </button>
-                    {currentTrack?.audioBase64 && (
+                    {currentTrack && (currentTrack.mediaPath || currentTrack.audioBase64) && (
                       <button
                         type="button"
                         onClick={handleUseCurrentTrack}
@@ -1499,14 +1534,14 @@ export default function MusicStudioPage() {
                           <Volume2 className="h-4 w-4 shrink-0 text-violet-400" />
                         ) : isCurrent ? (
                           <Music className="h-4 w-4 shrink-0 text-violet-400" />
-                        ) : track.audioUrl ? (
+                        ) : getTrackAudioSrc(track) ? (
                           <Play className="h-4 w-4 shrink-0" />
                         ) : (
                           <Music className="h-4 w-4 shrink-0 opacity-40" />
                         )}
                         <div className="flex min-w-0 flex-col items-start">
                           <span className="truncate">{track.name}</span>
-                          {!track.audioUrl && (
+                          {!getTrackAudioSrc(track) && (
                             <span className="text-[10px] text-zinc-600">
                               {isRu ? "только текст" : "text only"}
                             </span>

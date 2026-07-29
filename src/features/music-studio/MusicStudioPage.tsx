@@ -1,14 +1,33 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Music, Play, Pause, Sparkles, Volume2, Download, Trash2 } from "lucide-react";
+import { Music, Play, Pause, Sparkles, Volume2, Download, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
+import { save, open } from "@tauri-apps/plugin-dialog";
 import { chatCompletion, chatAudioGenerate } from "../../api/endpoints/chat";
+import {
+  aceStepGenerate,
+  aceStepPoll,
+  aceStepDownloadAudio,
+  aceStepStageAudio,
+  aceStepModels,
+} from "../../api/endpoints/acestep";
+import type {
+  AceStepTaskType,
+  AceStepGenerateParams,
+  AceStepModel,
+  AceStepPollItem,
+} from "../../api/endpoints/acestep";
+import { planAceStepMusic } from "./aceStepPlanner";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
-import { buildLyricsSystemPrompt, cleanLyricsTranscript, looksLikeTranscript, stripChordLines } from "../../shared/lyricsPrompt";
+import {
+  buildLyricsSystemPrompt,
+  cleanLyricsTranscript,
+  looksLikeTranscript,
+  stripChordLines,
+} from "../../shared/lyricsPrompt";
 import { useDefaultModel } from "../../shared/useDefaultModel";
-import { saveGeneration, getGenerations, setSetting, deleteGeneration } from "../../db";
+import { saveGeneration, getGenerations, setSetting, getSetting, deleteGeneration } from "../../db";
 import type { ChatMessage } from "../../api/types";
 
 interface Track {
@@ -45,8 +64,75 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function getFileName(path: string): string {
+  return path.replace(/^.*[\\/]/, "");
+}
+
+const STEM_LIST = [
+  "vocals",
+  "backing_vocals",
+  "drums",
+  "bass",
+  "guitar",
+  "keyboard",
+  "percussion",
+  "strings",
+  "synth",
+  "fx",
+  "brass",
+  "woodwinds",
+];
+
+const TASK_TYPE_OPTIONS: AceStepTaskType[] = ["text2music", "cover", "repaint", "extract", "complete"];
+
+const KEY_OPTIONS: { value: string; labelKey: string }[] = [
+  { value: "", labelKey: "keys.auto" },
+  { value: "C Major", labelKey: "keys.C_Major" },
+  { value: "Am", labelKey: "keys.Am" },
+  { value: "G Major", labelKey: "keys.G_Major" },
+  { value: "Em", labelKey: "keys.Em" },
+  { value: "D Major", labelKey: "keys.D_Major" },
+  { value: "Bm", labelKey: "keys.Bm" },
+  { value: "F Major", labelKey: "keys.F_Major" },
+  { value: "Dm", labelKey: "keys.Dm" },
+  { value: "A Major", labelKey: "keys.A_Major" },
+  { value: "F#m", labelKey: "keys.Fsharp_m" },
+];
+
+const TIME_SIG_OPTIONS: { value: string; labelKey: string }[] = [
+  { value: "", labelKey: "keys.auto" },
+  { value: "2", labelKey: "timeSignatures.2/4" },
+  { value: "3", labelKey: "timeSignatures.3/4" },
+  { value: "4", labelKey: "timeSignatures.4/4" },
+  { value: "6", labelKey: "timeSignatures.6/8" },
+];
+
+const VOCAL_LANG_OPTIONS: { value: string; labelKey: string }[] = [
+  { value: "", labelKey: "vocalLanguages.auto" },
+  { value: "ru", labelKey: "vocalLanguages.ru" },
+  { value: "en", labelKey: "vocalLanguages.en" },
+  { value: "es", labelKey: "vocalLanguages.es" },
+  { value: "de", labelKey: "vocalLanguages.de" },
+  { value: "fr", labelKey: "vocalLanguages.fr" },
+  { value: "ja", labelKey: "vocalLanguages.ja" },
+  { value: "zh", labelKey: "vocalLanguages.zh" },
+  { value: "ko", labelKey: "vocalLanguages.ko" },
+];
+
+const HARDCODED_ACE_MODELS: AceStepModel[] = [
+  { name: "acestep-v15-turbo", is_default: true },
+  { name: "acestep-v15-sft", is_default: false },
+  { name: "acestep-v15-base", is_default: false },
+  { name: "acestep-v15-xl-turbo", is_default: false },
+  { name: "acestep-v15-xl-sft", is_default: false },
+  { name: "acestep-v15-xl-base", is_default: false },
+];
+
+class GenerationAbortedError extends Error {}
+
 export default function MusicStudioPage() {
   const { i18n } = useTranslation();
+  const { t } = useTranslation("music");
   const [prompt, setPrompt] = useState("");
   const [genre, setGenre] = useState("pop");
   const [tempo, setTempo] = useState("120");
@@ -69,13 +155,82 @@ export default function MusicStudioPage() {
   const currentTrackRef = useRef<Track | null>(null);
   const isPlayingRef = useRef(false);
   const audioUrlsRef = useRef<Set<string>>(new Set());
+  const generationRunRef = useRef(0);
   const audioModel = useDefaultModel("audio");
   const textModel = useDefaultModel("text");
 
   const isRu = i18n.language?.startsWith("ru") ?? false;
 
+  const [provider, setProvider] = useState<"routerai" | "acestep">("routerai");
+  const [aceModels, setAceModels] = useState<AceStepModel[]>([]);
+  const [selectedAceModel, setSelectedAceModel] = useState("");
+  const [taskType, setTaskType] = useState<AceStepTaskType>("text2music");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [aceDuration, setAceDuration] = useState(180);
+  const [aceBpm, setAceBpm] = useState("");
+  const [aceKeyScale, setAceKeyScale] = useState("");
+  const [aceTimeSignature, setAceTimeSignature] = useState("");
+  const [aceVocalLanguage, setAceVocalLanguage] = useState(isRu ? "ru" : "en");
+  const [aceBatchSize, setAceBatchSize] = useState(2);
+  const [useRandomSeed, setUseRandomSeed] = useState(true);
+  const [aceSeed, setAceSeed] = useState("");
+  const [aceAudioFormat, setAceAudioFormat] = useState<"mp3" | "wav">("mp3");
+  const [referenceAudioPath, setReferenceAudioPath] = useState<string | null>(null);
+  const [srcAudioPath, setSrcAudioPath] = useState<string | null>(null);
+  const [coverStrength, setCoverStrength] = useState(0.8);
+  const [repaintStart, setRepaintStart] = useState(0);
+  const [repaintEnd, setRepaintEnd] = useState<number | string>("");
+  const [selectedStems, setSelectedStems] = useState<string[]>([]);
+  const [statusText, setStatusText] = useState<string | null>(null);
+  const [aceModelsLive, setAceModelsLive] = useState(false);
+
+  const hasBaseModel = aceModelsLive && aceModels.some((m) => m.name.includes("-base"));
+
+  useEffect(() => {
+    const runRef = generationRunRef;
+    return () => {
+      runRef.current++;
+    };
+  }, []);
+
   useEffect(() => { currentTrackRef.current = currentTrack; }, [currentTrack]);
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+
+  useEffect(() => {
+    getSetting("default_music_provider").then((v) => {
+      if (v === "acestep" || v === "routerai") setProvider(v as "routerai" | "acestep");
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (provider !== "acestep") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await aceStepModels();
+        if (cancelled) return;
+        setAceModels(result.models);
+        setAceModelsLive(true);
+        const saved = await getSetting("default_ace_step_model");
+        if (saved && result.models.some((m) => m.name === saved)) {
+          setSelectedAceModel(saved);
+        } else {
+          setSelectedAceModel(result.default_model || result.models[0]?.name || "");
+        }
+      } catch {
+        if (cancelled) return;
+        setAceModels(HARDCODED_ACE_MODELS);
+        setAceModelsLive(false);
+        const saved = await getSetting("default_ace_step_model");
+        if (saved && HARDCODED_ACE_MODELS.some((m) => m.name === saved)) {
+          setSelectedAceModel(saved);
+        } else {
+          setSelectedAceModel(HARDCODED_ACE_MODELS[0].name);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [provider]);
 
   useEffect(() => {
     const audio = new Audio();
@@ -115,20 +270,21 @@ export default function MusicStudioPage() {
 
     (async () => {
       try {
-        const generations = await getGenerations(undefined, "/v1/chat/completions");
+        const generations = await getGenerations(undefined);
         if (cancelled) return;
 
         const musicGenerations = generations
           .filter(
             (g) =>
-              g.endpoint === "/v1/chat/completions" &&
+              (g.endpoint === "/v1/chat/completions" || g.endpoint === "acestep") &&
               (g.mediaType?.startsWith("audio/") || g.mediaType === "text/lyrics") &&
               g.status === "completed"
           )
           .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
         console.log(`Loaded ${musicGenerations.length} music generations from DB`);
 
-        const loadedTracks: Track[] = [];
+        const routeraiTracks: Track[] = [];
+        const acestepTracks: Track[] = [];
 
         for (const gen of musicGenerations) {
           let trackData: SavedTrackData | null = null;
@@ -153,7 +309,7 @@ export default function MusicStudioPage() {
             audioUrlsRef.current.add(audioUrl);
           }
 
-          let reqData: { prompt?: string; genre?: string; tempo?: string } = {};
+          let reqData: { prompt?: string; genre?: string; tempo?: string; base?: string; stem?: string } = {};
           if (gen.requestJson) {
             try {
               reqData = JSON.parse(gen.requestJson);
@@ -162,31 +318,43 @@ export default function MusicStudioPage() {
             }
           }
 
-          const trackGenre = reqData.genre || "pop";
-          // Legacy records may hold a raw performance transcript (with
-          // [[A0]] / [0.0:] / [:] markup) in the lyrics field — clean it.
-          const rawLyrics = trackData?.lyrics || "";
-          const loadedTrack: Track = {
-            id: gen.id,
-            name: `Track ${loadedTracks.length + 1}`,
-            genre: trackGenre,
-            lyrics: looksLikeTranscript(rawLyrics) ? cleanLyricsTranscript(rawLyrics) : rawLyrics,
-            transcript: trackData?.transcript,
-            audioUrl,
-            audioBase64,
-            audioFormat,
-          };
-
-          loadedTracks.push(loadedTrack);
+          if (gen.endpoint === "acestep") {
+            const name = reqData.stem
+              ? `${reqData.base ?? "Track"} — ${reqData.stem}`
+              : `${reqData.base ?? "Track"} — ACE-Step`;
+            const rawLyrics = trackData?.lyrics || "";
+            acestepTracks.push({
+              id: gen.id,
+              name,
+              genre: "acestep",
+              lyrics: looksLikeTranscript(rawLyrics) ? cleanLyricsTranscript(rawLyrics) : rawLyrics,
+              transcript: trackData?.transcript,
+              audioUrl,
+              audioBase64,
+              audioFormat,
+            });
+          } else {
+            const trackGenre = reqData.genre || "pop";
+            const rawLyrics = trackData?.lyrics || "";
+            routeraiTracks.push({
+              id: gen.id,
+              name: `Track ${routeraiTracks.length + 1}`,
+              genre: trackGenre,
+              lyrics: looksLikeTranscript(rawLyrics) ? cleanLyricsTranscript(rawLyrics) : rawLyrics,
+              transcript: trackData?.transcript,
+              audioUrl,
+              audioBase64,
+              audioFormat,
+            });
+          }
         }
 
         if (!cancelled) {
-          // Renumber tracks with genre info, newest first
-          const numbered = loadedTracks.map((t, i) => ({
+          const numbered = routeraiTracks.map((t, i) => ({
             ...t,
             name: `Track ${i + 1} — ${t.genre}`,
           }));
-          setTracks(numbered.reverse());
+          setTracks([...acestepTracks.reverse(), ...numbered.reverse()]);
         }
       } catch (e) {
         if (!cancelled) {
@@ -197,6 +365,52 @@ export default function MusicStudioPage() {
 
     return () => { cancelled = true; };
     }, []);
+
+  const handleProviderChange = (newProvider: "routerai" | "acestep") => {
+    setProvider(newProvider);
+    setSetting("default_music_provider", newProvider).catch(() => {});
+  };
+
+  const handleAceModelChange = (model: string) => {
+    setSelectedAceModel(model);
+    setSetting("default_ace_step_model", model).catch(() => {});
+  };
+
+  const toggleStem = (stem: string) => {
+    setSelectedStems((prev) =>
+      prev.includes(stem) ? prev.filter((s) => s !== stem) : [...prev, stem]
+    );
+  };
+
+  const toggleAllStems = () => {
+    setSelectedStems((prev) =>
+      prev.length === STEM_LIST.length ? [] : [...STEM_LIST]
+    );
+  };
+
+  const handleUseCurrentTrack = async () => {
+    if (!currentTrack?.audioBase64) return;
+    try {
+      const path = await aceStepStageAudio(currentTrack.audioBase64, currentTrack.audioFormat || "mp3");
+      setSrcAudioPath(path);
+    } catch (e) {
+      console.error("Failed to stage current track:", e);
+    }
+  };
+
+  const handlePickAudio = async (setter: (p: string) => void) => {
+    try {
+      const selected = await open({
+        filters: [{ name: "Audio", extensions: ["mp3", "wav", "flac", "ogg"] }],
+        multiple: false,
+      });
+      if (selected) {
+        setter(Array.isArray(selected) ? selected[0] : selected);
+      }
+    } catch (e) {
+      console.error("File pick failed:", e);
+    }
+  };
 
   const playTrack = useCallback((track: Track) => {
     const audio = audioRef.current;
@@ -218,7 +432,6 @@ export default function MusicStudioPage() {
     const isSame = currentTrackRef.current?.id === track.id;
 
     if (isSame) {
-      // Clicking the current track toggles play/pause
       playTrack(track);
       return;
     }
@@ -231,7 +444,6 @@ export default function MusicStudioPage() {
       audio.src = track.audioUrl;
       audio.play().catch(console.error);
     } else if (audio) {
-      // Text-only track: stop whatever was playing
       audio.pause();
       audio.src = "";
     }
@@ -286,7 +498,6 @@ export default function MusicStudioPage() {
       }
       return prev.filter((t) => t.id !== trackId);
     });
-    // Only stop playback when the deleted track is the one playing
     if (currentTrackRef.current?.id === trackId) {
       currentTrackRef.current = null;
       setCurrentTrack(null);
@@ -345,16 +556,300 @@ export default function MusicStudioPage() {
   };
 
   const handleGenerateMusic = async () => {
+    if (provider === "acestep") {
+      const runId = ++generationRunRef.current;
+      setLoading(true);
+      setError(null);
+      setStatusText(null);
+      try {
+        if (
+          (taskType === "cover" || taskType === "repaint" || taskType === "extract" || taskType === "complete") &&
+          !srcAudioPath
+        ) {
+          setError(t("errors.needSrcAudio"));
+          setLoading(false);
+          return;
+        }
+        if (taskType === "extract" && selectedStems.length === 0) {
+          setError(t("errors.needStems"));
+          setLoading(false);
+          return;
+        }
+        if (taskType === "complete" && selectedStems.length === 0) {
+          setError(t("errors.needCompleteTracks"));
+          setLoading(false);
+          return;
+        }
+
+        setStatusText(t("statuses.submitting"));
+
+        let planCaption: string | undefined;
+        let planBpm: number | undefined;
+        let planKeyScale: string | undefined;
+        let planTimeSignature: string | undefined;
+        let planDuration: number | undefined;
+        let planVocalLanguage: string | undefined;
+
+        if (taskType === "text2music" || taskType === "complete") {
+          try {
+            const plan = await planAceStepMusic(prompt, lyrics, textModel.defaultModel);
+            planCaption = plan.caption;
+            planBpm = plan.bpm;
+            planKeyScale = plan.key_scale;
+            planTimeSignature = plan.time_signature;
+            planDuration = plan.duration;
+            planVocalLanguage = plan.vocal_language;
+          } catch (e) {
+            console.warn("ACE-Step planner failed:", e);
+          }
+        }
+
+        const mergedCaption = taskType === "text2music" ? (planCaption ?? prompt) : prompt;
+        const mergedBpm = aceBpm ? Number(aceBpm) : planBpm;
+        const mergedKeyScale = aceKeyScale || planKeyScale;
+        const mergedTimeSignature = aceTimeSignature || planTimeSignature;
+        const mergedDuration = aceDuration || planDuration;
+        const mergedVocalLanguage = aceVocalLanguage || planVocalLanguage;
+        const inferenceSteps = selectedAceModel.includes("-base") ? 50 : undefined;
+        const userLyrics = lyrics.trim();
+
+        const taskIds: string[] = [];
+        const taskStemMap: Record<string, string> = {};
+
+        if (taskType === "extract") {
+          for (const stem of selectedStems) {
+            const { taskId } = await aceStepGenerate({
+              prompt: mergedCaption || "Extract stems",
+              lyrics: userLyrics,
+              taskType: "extract",
+              model: selectedAceModel,
+              audioFormat: aceAudioFormat,
+              batchSize: 1,
+              inferenceSteps,
+              srcAudioPath: srcAudioPath ?? undefined,
+              instruction: `Extract the ${stem} track from the audio:`,
+            });
+            taskIds.push(taskId);
+            taskStemMap[taskId] = stem;
+          }
+        } else if (taskType === "complete") {
+          const { taskId } = await aceStepGenerate({
+            prompt: mergedCaption || "Complete arrangement",
+            lyrics: userLyrics,
+            taskType: "complete",
+            model: selectedAceModel,
+            audioFormat: aceAudioFormat,
+            batchSize: 1,
+            inferenceSteps,
+            srcAudioPath: srcAudioPath ?? undefined,
+            instruction: `Complete the input track with ${selectedStems.join(", ")}:`,
+          });
+          taskIds.push(taskId);
+        } else {
+          const params: AceStepGenerateParams = {
+            prompt: mergedCaption || prompt,
+            lyrics: userLyrics,
+            taskType,
+            model: selectedAceModel,
+            audioFormat: aceAudioFormat,
+          };
+
+          if (taskType === "text2music") {
+            if (mergedBpm && mergedBpm > 0) params.bpm = mergedBpm;
+            if (mergedKeyScale) params.keyScale = mergedKeyScale;
+            if (mergedTimeSignature) params.timeSignature = mergedTimeSignature;
+            if (mergedDuration) params.audioDuration = mergedDuration;
+            if (mergedVocalLanguage) params.vocalLanguage = mergedVocalLanguage;
+            params.batchSize = aceBatchSize;
+            params.useRandomSeed = useRandomSeed;
+            if (!useRandomSeed && aceSeed) params.seed = Number(aceSeed);
+            if (referenceAudioPath) params.referenceAudioPath = referenceAudioPath;
+          }
+          if (taskType === "cover") {
+            params.audioCoverStrength = coverStrength;
+            if (srcAudioPath) params.srcAudioPath = srcAudioPath;
+          }
+          if (taskType === "repaint") {
+            params.repaintingStart = repaintStart;
+            params.repaintingEnd = repaintEnd === "" ? -1 : Number(repaintEnd);
+            if (srcAudioPath) params.srcAudioPath = srcAudioPath;
+          }
+          if (inferenceSteps) params.inferenceSteps = inferenceSteps;
+
+          const { taskId } = await aceStepGenerate(params);
+          taskIds.push(taskId);
+        }
+
+        let attempts = 0;
+        const maxAttempts = taskType === "extract" ? Math.max(300, 120 * selectedStems.length) : 300;
+
+        let pollResult: AceStepPollItem[] = [];
+        while (true) {
+          await new Promise((r) => setTimeout(r, 2000));
+          if (generationRunRef.current !== runId) throw new GenerationAbortedError();
+          attempts++;
+          pollResult = await aceStepPoll(taskIds);
+          if (pollResult.length === 0) {
+            throw new Error(t("errors.generationFailed", { error: "No task results returned" }));
+          }
+          const doneCount = pollResult.filter((item) => item.status !== 0).length;
+          setStatusText(
+            t("statuses.generating", {
+              attempt: attempts,
+              done: doneCount,
+              total: taskIds.length,
+            })
+          );
+
+          const failedItems = pollResult.filter((item) => item.status === 2);
+          const fatalFailure =
+            failedItems.length > 0 &&
+            (taskType !== "extract" || failedItems.length === pollResult.length);
+          if (fatalFailure) {
+            throw new Error(failedItems[0].error || t("errors.generationFailed", { error: "Unknown error" }));
+          }
+
+          if (pollResult.every((item) => item.status !== 0)) {
+            break;
+          }
+
+          if (attempts >= maxAttempts) {
+            throw new Error("Generation timeout");
+          }
+        }
+
+        setStatusText(t("statuses.downloading"));
+
+        const base =
+          taskType === "text2music"
+            ? (prompt.trim() ? prompt.trim().slice(0, 24) : "Track")
+            : currentTrack?.name
+              ? currentTrack.name.replace(/\.[^.]+$/, "")
+              : srcAudioPath
+                ? getFileName(srcAudioPath).replace(/\.[^.]+$/, "")
+                : "Track";
+
+        const newTracks: Track[] = [];
+
+        for (const item of pollResult) {
+          if (generationRunRef.current !== runId) throw new GenerationAbortedError();
+          if (item.status !== 1) continue;
+          for (const file of item.files) {
+            const audio = await aceStepDownloadAudio(file.file);
+
+            const audioMime = audio.audio_format === "wav" ? "audio/wav" : "audio/mpeg";
+            const blob = base64ToBlob(audio.audio_base64, audioMime);
+            const audioUrl = URL.createObjectURL(blob);
+            audioUrlsRef.current.add(audioUrl);
+
+            const stemForName =
+              taskType === "extract" ? taskStemMap[item.task_id] : undefined;
+            const trackName = stemForName
+              ? `${base} — ${stemForName}`
+              : `${base} — ACE-Step`;
+
+            const trackLyrics = file.lyrics ?? userLyrics;
+            const trackId = generateId();
+
+            const newTrack: Track = {
+              id: trackId,
+              name: trackName,
+              genre: "acestep",
+              lyrics: looksLikeTranscript(trackLyrics) ? cleanLyricsTranscript(trackLyrics) : trackLyrics,
+              transcript: file.lyrics || undefined,
+              audioUrl,
+              audioBase64: audio.audio_base64,
+              audioFormat: audio.audio_format,
+            };
+
+            newTracks.push(newTrack);
+
+            const fmt = audio.audio_format || "mp3";
+            try {
+              await saveGeneration({
+                id: trackId,
+                projectId: null,
+                model: selectedAceModel,
+                endpoint: "acestep",
+                requestJson: JSON.stringify({
+                  prompt,
+                  taskType,
+                  model: selectedAceModel,
+                  base,
+                  ...(stemForName ? { stem: stemForName } : {}),
+                }),
+                responseJson: JSON.stringify({
+                  lyrics: trackLyrics,
+                  audio_base64: audio.audio_base64,
+                  audio_format: audio.audio_format,
+                  ...(file.metas ? { metas: file.metas } : {}),
+                  ...(file.seed_value ? { seed: file.seed_value } : {}),
+                }),
+                status: "completed",
+                mediaPath: null,
+                mediaType: `audio/${fmt}`,
+                parentId: null,
+                costRub: null,
+                generationId: null,
+              });
+            } catch (e) {
+              console.error("saveGeneration failed for ACE-Step track:", e);
+            }
+          }
+        }
+
+        setTracks((prev) => [...newTracks, ...prev]);
+
+        if (newTracks.length === 0) {
+          throw new Error(t("errors.generationFailed", { error: "No audio files returned" }));
+        }
+
+        if (taskType === "extract") {
+          const failedStems = pollResult
+            .filter((item) => item.status === 2)
+            .map((item) => taskStemMap[item.task_id] ?? item.task_id);
+          if (failedStems.length > 0) {
+            setError(t("errors.generationFailed", { error: `stems: ${failedStems.join(", ")}` }));
+          }
+        }
+
+        if (newTracks.length > 0) {
+          const firstTrack = newTracks[0];
+          currentTrackRef.current = firstTrack;
+          setCurrentTrack(firstTrack);
+          setLyrics(firstTrack.lyrics);
+          setCurrentTime(0);
+          setDuration(0);
+          if (firstTrack.audioUrl && audioRef.current) {
+            audioRef.current.src = firstTrack.audioUrl;
+            audioRef.current.play().catch(console.error);
+          }
+        }
+      } catch (e) {
+        if (e instanceof GenerationAbortedError) {
+          setLoading(false);
+          setStatusText(null);
+          return;
+        }
+        const errStr = String(e);
+        if (errStr.includes("not reachable") || errStr.toLowerCase().includes("connection refused")) {
+          setError(t("errors.notReachable"));
+        } else if (errStr.includes("Server busy") || errStr.includes("queue full") || errStr.includes("429")) {
+          setError(t("errors.serverBusy"));
+        } else {
+          setError(errStr);
+        }
+        console.error("ACE-Step generation failed:", e);
+      }
+      setLoading(false);
+      setStatusText(null);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
-      // The lyrics field is the single source of truth: when the user wrote
-      // or edited lyrics, the model must perform exactly them. The returned
-      // transcript never overwrites the field.
       const userLyrics = lyrics.trim();
-      // Chord-only lines (Am, G7, Dm ...) are stripped from the audio
-      // payload — the model would sing the chord letters aloud. The lyrics
-      // field itself keeps them untouched.
       const trackPrompt = (userLyrics ? stripChordLines(userLyrics) : "") || prompt;
       const result = await chatAudioGenerate(trackPrompt, audioModel.defaultModel, {
         genre,
@@ -371,8 +866,6 @@ export default function MusicStudioPage() {
         audioUrlsRef.current.add(audioUrl);
       }
 
-      // When the model wrote the lyrics itself (field was empty), show the
-      // cleaned transcript. Otherwise keep the user's text untouched.
       const finalLyrics = userLyrics || cleanLyricsTranscript(result.lyrics);
 
       const trackId = generateId();
@@ -420,7 +913,6 @@ export default function MusicStudioPage() {
           requestJson: JSON.stringify({ prompt: trackPrompt, genre, tempo, model: audioModel.defaultModel }),
           responseJson,
           status: "completed",
-          // blob: URLs die with the session — don't persist them
           mediaPath: null,
           mediaType: result.audio_base64 ? `audio/${result.audio_format}` : "text/lyrics",
           parentId: null,
@@ -440,6 +932,20 @@ export default function MusicStudioPage() {
   };
 
   const hasAudio = currentTrack?.audioUrl != null;
+
+  const acestepCantGenerate =
+    taskType === "extract"
+      ? !srcAudioPath || selectedStems.length === 0
+      : taskType === "complete"
+        ? !srcAudioPath || selectedStems.length === 0
+        : taskType === "cover" || taskType === "repaint"
+          ? !srcAudioPath
+          : !prompt.trim();
+  const generateDisabled =
+    loading ||
+    (provider === "routerai"
+      ? !lyrics.trim() && !prompt.trim()
+      : acestepCantGenerate);
 
   return (
     <div className="flex h-full">
@@ -469,106 +975,424 @@ export default function MusicStudioPage() {
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+            <span>{t("provider.label")}:</span>
+            <select
+              value={provider}
+              onChange={(e) => handleProviderChange(e.target.value as "routerai" | "acestep")}
+              disabled={loading}
+              className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
+            >
+              <option value="routerai">{t("provider.routerai")}</option>
+              <option value="acestep">{t("provider.acestep")}</option>
+            </select>
+
             <span>{isRu ? "Текст:" : "Text:"}</span>
             <select
               value={textModel.defaultModel}
               onChange={(e) => handleTextModelChange(e.target.value)}
+              disabled={loading}
               className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
             >
               {textModel.availableModels.map((m) => (
                 <option key={m.id} value={m.id}>{m.name}</option>
               ))}
             </select>
-            <span className="ml-3">{isRu ? "Аудио:" : "Audio:"}</span>
-            <select
-              value={audioModel.defaultModel}
-              onChange={(e) => handleAudioModelChange(e.target.value)}
-              className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
-            >
-              {audioModel.availableModels.map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </select>
+
+            {provider === "routerai" ? (
+              <>
+                <span className="ml-3">{isRu ? "Аудио:" : "Audio:"}</span>
+                <select
+                  value={audioModel.defaultModel}
+                  onChange={(e) => handleAudioModelChange(e.target.value)}
+                  disabled={loading}
+                  className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
+                >
+                  {audioModel.availableModels.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </>
+            ) : (
+              <>
+                <span className="ml-3">{t("form.model")}:</span>
+                <select
+                  value={selectedAceModel}
+                  onChange={(e) => handleAceModelChange(e.target.value)}
+                  disabled={loading}
+                  className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
+                >
+                  {aceModels.map((m) => (
+                    <option key={m.name} value={m.name}>{m.name}</option>
+                  ))}
+                </select>
+                <select
+                  value={taskType}
+                  onChange={(e) => setTaskType(e.target.value as AceStepTaskType)}
+                  disabled={loading}
+                  className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
+                >
+                  {TASK_TYPE_OPTIONS.map((tt) => {
+                    const needsBase = tt === "extract" || tt === "complete";
+                    return (
+                      <option key={tt} value={tt} disabled={needsBase && !hasBaseModel}>
+                        {t(`taskTypes.${tt}`)}
+                      </option>
+                    );
+                  })}
+                </select>
+                {taskType === "extract" || taskType === "complete" ? (
+                  <span className="ml-3">{t("form.sourceAudio")}:</span>
+                ) : taskType === "text2music" ? null : (
+                  <span className="ml-3">{t("form.sourceAudio")}:</span>
+                )}
+                {(taskType !== "text2music") && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handlePickAudio(setSrcAudioPath)}
+                      disabled={loading}
+                      className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
+                    >
+                      {t("form.chooseFile")}
+                    </button>
+                    {currentTrack?.audioBase64 && (
+                      <button
+                        type="button"
+                        onClick={handleUseCurrentTrack}
+                        disabled={loading}
+                        className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
+                      >
+                        {t("form.useCurrentTrack")}
+                      </button>
+                    )}
+                    <span className="truncate text-zinc-500">
+                      {srcAudioPath ? getFileName(srcAudioPath) : t("form.noFileChosen")}
+                    </span>
+                  </>
+                )}
+              </>
+            )}
           </div>
 
-          <div className="mt-3 flex items-center gap-2">
-            <select
-              value={genre}
-              onChange={(e) => setGenre(e.target.value)}
-              className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
-            >
-              <option value="pop">Pop</option>
-              <option value="rock">Rock</option>
-              <option value="hiphop">Hip Hop</option>
-              <option value="electronic">Electronic</option>
-              <option value="jazz">Jazz</option>
-              <option value="classical">Classical</option>
-            </select>
-            <input
-              value={tempo}
-              onChange={(e) => setTempo(e.target.value)}
-              placeholder="BPM"
-              className="w-16 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none focus:border-violet-500"
-            />
-            <input
-              value={styleText}
-              onChange={(e) => setStyleText(e.target.value)}
-              placeholder={isRu ? "Стиль: акустика, мужской вокал..." : "Style: acoustic, male vocal..."}
-              title={isRu
-                ? "Свободное описание стиля для музыкальной модели. Имена исполнителей могут отфильтровываться."
-                : "Free-form style description for the music model. Artist names may be filtered."}
-              className="w-56 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none focus:border-violet-500"
-            />
-            <label className="flex items-center gap-1 text-zinc-500">
-              {isRu ? "Куплетов:" : "Verses:"}
+          {provider === "acestep" && (
+            <>
+              {!hasBaseModel && (
+                <div className="mt-2 text-xs text-amber-400/80">
+                  {t("errors.needBaseModel")}
+                </div>
+              )}
+              <div className="mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced(!showAdvanced)}
+                  className="flex items-center gap-1 text-xs text-zinc-400 transition-colors hover:text-zinc-300"
+                >
+                  {showAdvanced ? (
+                    <ChevronDown className="h-3 w-3" />
+                  ) : (
+                    <ChevronRight className="h-3 w-3" />
+                  )}
+                  {t("form.advancedToggle")}
+                </button>
+              </div>
+              {showAdvanced && (
+                <div className="mt-2 grid grid-cols-3 gap-x-3 gap-y-2">
+                  {taskType === "text2music" && (
+                    <>
+                      <label className="flex flex-col gap-0.5 text-xs text-zinc-500">
+                        {t("form.duration")}
+                        <input
+                          type="number"
+                          min={10}
+                          max={600}
+                          value={aceDuration}
+                          onChange={(e) => setAceDuration(Math.max(10, Math.min(600, Number(e.target.value) || 10)))}
+                          disabled={loading}
+                          className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none focus:border-violet-500"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-0.5 text-xs text-zinc-500">
+                        {t("form.bpm")}
+                        <input
+                          type="number"
+                          min={30}
+                          max={300}
+                          value={aceBpm}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (v === "") { setAceBpm(""); return; }
+                            const n = Number(v);
+                            setAceBpm(String(Math.max(30, Math.min(300, Number.isNaN(n) ? 30 : n))));
+                          }}
+                          placeholder="Auto"
+                          disabled={loading}
+                          className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none focus:border-violet-500 placeholder:text-zinc-600"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-0.5 text-xs text-zinc-500">
+                        {t("form.key")}
+                        <select
+                          value={aceKeyScale}
+                          onChange={(e) => setAceKeyScale(e.target.value)}
+                          disabled={loading}
+                          className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
+                        >
+                          {KEY_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-0.5 text-xs text-zinc-500">
+                        {t("form.timeSignature")}
+                        <select
+                          value={aceTimeSignature}
+                          onChange={(e) => setAceTimeSignature(e.target.value)}
+                          disabled={loading}
+                          className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
+                        >
+                          {TIME_SIG_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-0.5 text-xs text-zinc-500">
+                        {t("form.vocalLanguage")}
+                        <select
+                          value={aceVocalLanguage}
+                          onChange={(e) => setAceVocalLanguage(e.target.value)}
+                          disabled={loading}
+                          className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
+                        >
+                          {VOCAL_LANG_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-0.5 text-xs text-zinc-500">
+                        {t("form.batchSize")}
+                        <input
+                          type="number"
+                          min={1}
+                          max={8}
+                          value={aceBatchSize}
+                          onChange={(e) => setAceBatchSize(Math.max(1, Math.min(8, Number(e.target.value) || 1)))}
+                          disabled={loading}
+                          className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none focus:border-violet-500"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-0.5 text-xs text-zinc-500">
+                        {t("form.audioFormat")}
+                        <select
+                          value={aceAudioFormat}
+                          onChange={(e) => setAceAudioFormat(e.target.value as "mp3" | "wav")}
+                          disabled={loading}
+                          className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
+                        >
+                          <option value="mp3">mp3</option>
+                          <option value="wav">wav</option>
+                        </select>
+                      </label>
+                      <label className="flex items-center gap-1.5 text-xs text-zinc-500">
+                        <input
+                          type="checkbox"
+                          checked={useRandomSeed}
+                          onChange={(e) => setUseRandomSeed(e.target.checked)}
+                          disabled={loading}
+                          className="accent-violet-500"
+                        />
+                        {t("form.randomSeed")}
+                      </label>
+                      {!useRandomSeed && (
+                        <label className="flex flex-col gap-0.5 text-xs text-zinc-500">
+                          {t("form.fixedSeed")}
+                          <input
+                            type="number"
+                            value={aceSeed}
+                            onChange={(e) => setAceSeed(e.target.value)}
+                            disabled={loading}
+                            className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none focus:border-violet-500"
+                          />
+                        </label>
+                      )}
+                      <label className="col-span-3 flex items-center gap-1.5 text-xs text-zinc-500">
+                        <span>{t("form.referenceAudio")}:</span>
+                        <button
+                          type="button"
+                          onClick={() => handlePickAudio(setReferenceAudioPath)}
+                          disabled={loading}
+                          className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
+                        >
+                          {t("form.chooseFile")}
+                        </button>
+                        <span className="truncate text-zinc-500">
+                          {referenceAudioPath ? getFileName(referenceAudioPath) : t("form.noFileChosen")}
+                        </span>
+                      </label>
+                    </>
+                  )}
+
+                  {taskType === "cover" && (
+                    <label className="col-span-3 flex flex-col gap-0.5 text-xs text-zinc-500">
+                      <span>{t("form.coverStrength")}: {coverStrength.toFixed(2)}</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={coverStrength}
+                        onChange={(e) => setCoverStrength(Number(e.target.value))}
+                        disabled={loading}
+                        className="h-1 cursor-pointer appearance-none rounded bg-zinc-700 accent-violet-500"
+                      />
+                    </label>
+                  )}
+
+                  {taskType === "repaint" && (
+                    <>
+                      <label className="flex flex-col gap-0.5 text-xs text-zinc-500">
+                        {t("form.repaintStart")}
+                        <input
+                          type="number"
+                          min={0}
+                          value={repaintStart}
+                          onChange={(e) => setRepaintStart(Math.max(0, Number(e.target.value) || 0))}
+                          disabled={loading}
+                          className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none focus:border-violet-500"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-0.5 text-xs text-zinc-500">
+                        {t("form.repaintEnd")}
+                        <input
+                          type="text"
+                          value={repaintEnd}
+                          onChange={(e) => setRepaintEnd(e.target.value)}
+                          disabled={loading}
+                          placeholder="-1 = tail"
+                          className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none focus:border-violet-500 placeholder:text-zinc-600"
+                        />
+                      </label>
+                    </>
+                  )}
+
+                  {(taskType === "extract" || taskType === "complete") && (
+                    <div className="col-span-3">
+                      <label className="flex items-center gap-1.5 text-xs text-zinc-500 mb-1">
+                        <input
+                          type="checkbox"
+                          checked={selectedStems.length === STEM_LIST.length}
+                          onChange={toggleAllStems}
+                          disabled={loading}
+                          className="accent-violet-500"
+                        />
+                        {t("stems.selectAll")}
+                      </label>
+                      <div className="grid grid-cols-4 gap-x-2 gap-y-0.5">
+                        {STEM_LIST.map((stem) => (
+                          <label key={stem} className="flex items-center gap-1 text-xs text-zinc-400">
+                            <input
+                              type="checkbox"
+                              checked={selectedStems.includes(stem)}
+                              onChange={() => toggleStem(stem)}
+                              disabled={loading}
+                              className="accent-violet-500"
+                            />
+                            {t(`stems.${stem}`)}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
+          {provider === "routerai" && (
+            <div className="mt-3 flex items-center gap-2">
               <select
-                value={verses}
-                onChange={(e) => setVerses(e.target.value)}
-                className="rounded border border-zinc-700 bg-zinc-800 px-1 py-1 text-xs text-white outline-none"
+                value={genre}
+                onChange={(e) => setGenre(e.target.value)}
+                className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
               >
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
-                <option value="4">4</option>
+                <option value="pop">Pop</option>
+                <option value="rock">Rock</option>
+                <option value="hiphop">Hip Hop</option>
+                <option value="electronic">Electronic</option>
+                <option value="jazz">Jazz</option>
+                <option value="classical">Classical</option>
               </select>
-            </label>
-            <label className="flex items-center gap-1 text-zinc-500">
               <input
-                type="checkbox"
-                checked={chorus}
-                onChange={(e) => setChorus(e.target.checked)}
-                className="accent-violet-500"
+                value={tempo}
+                onChange={(e) => setTempo(e.target.value)}
+                placeholder="BPM"
+                className="w-16 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none focus:border-violet-500"
               />
-              {isRu ? "Припев" : "Chorus"}
-            </label>
-            <label className="flex items-center gap-1 text-zinc-500">
               <input
-                type="checkbox"
-                checked={bridge}
-                onChange={(e) => setBridge(e.target.checked)}
-                className="accent-violet-500"
+                value={styleText}
+                onChange={(e) => setStyleText(e.target.value)}
+                placeholder={isRu ? "Стиль: акустика, мужской вокал..." : "Style: acoustic, male vocal..."}
+                title={isRu
+                  ? "Свободное описание стиля для музыкальной модели. Имена исполнителей могут отфильтровываться."
+                  : "Free-form style description for the music model. Artist names may be filtered."}
+                className="w-56 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none focus:border-violet-500"
               />
-              {isRu ? "Бридж" : "Bridge"}
-            </label>
-            <label className="flex items-center gap-1 text-zinc-500">
-              <input
-                type="checkbox"
-                checked={introOutro}
-                onChange={(e) => setIntroOutro(e.target.checked)}
-                className="accent-violet-500"
-              />
-              {isRu ? "Интро/Аутро" : "Intro/Outro"}
-            </label>
-            <button
-              onClick={handleGenerateLyrics}
-              disabled={!prompt.trim() || loading}
-              className="rounded bg-zinc-800 px-3 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-700 disabled:opacity-50"
-            >
-              {isRu ? "Текст песни" : "Lyrics"}
-            </button>
+              <label className="flex items-center gap-1 text-zinc-500">
+                {isRu ? "Куплетов:" : "Verses:"}
+                <select
+                  value={verses}
+                  onChange={(e) => setVerses(e.target.value)}
+                  className="rounded border border-zinc-700 bg-zinc-800 px-1 py-1 text-xs text-white outline-none"
+                >
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-1 text-zinc-500">
+                <input
+                  type="checkbox"
+                  checked={chorus}
+                  onChange={(e) => setChorus(e.target.checked)}
+                  className="accent-violet-500"
+                />
+                {isRu ? "Припев" : "Chorus"}
+              </label>
+              <label className="flex items-center gap-1 text-zinc-500">
+                <input
+                  type="checkbox"
+                  checked={bridge}
+                  onChange={(e) => setBridge(e.target.checked)}
+                  className="accent-violet-500"
+                />
+                {isRu ? "Бридж" : "Bridge"}
+              </label>
+              <label className="flex items-center gap-1 text-zinc-500">
+                <input
+                  type="checkbox"
+                  checked={introOutro}
+                  onChange={(e) => setIntroOutro(e.target.checked)}
+                  className="accent-violet-500"
+                />
+                {isRu ? "Интро/Аутро" : "Intro/Outro"}
+              </label>
+              <button
+                onClick={handleGenerateLyrics}
+                disabled={!prompt.trim() || loading}
+                className="rounded bg-zinc-800 px-3 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-700 disabled:opacity-50"
+              >
+                {isRu ? "Текст песни" : "Lyrics"}
+              </button>
+            </div>
+          )}
+
+          <div className="mt-3 flex items-center gap-2">
+            {loading && provider === "acestep" && statusText && (
+              <span className="text-xs text-violet-400">{statusText}</span>
+            )}
             <button
               onClick={handleGenerateMusic}
-              disabled={(!lyrics.trim() && !prompt.trim()) || loading}
+              disabled={generateDisabled}
               className="ml-auto rounded bg-violet-600 px-4 py-1 text-xs font-medium text-white transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? (isRu ? "Генерация..." : "Generating...") : (isRu ? "Создать музыку" : "Generate Music")}

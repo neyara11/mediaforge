@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import ModelCatalog from "./ModelCatalog";
 import ErrorBoundary from "../../components/ErrorBoundary";
 import { getSetting, setSetting } from "../../db";
+import { apiInvoke } from "../../api/client";
 
 type Tab = "general" | "models";
 
@@ -14,16 +15,41 @@ export default function SettingsPage() {
   const { logout } = useAuth();
   const [tab, setTab] = useState<Tab>("general");
   const [ffmpegPath, setFfmpegPath] = useState("");
+  const [aceStepUrl, setAceStepUrl] = useState("http://localhost:8001");
+  const [aceStepTesting, setAceStepTesting] = useState(false);
+  const [aceStepTestResult, setAceStepTestResult] = useState<boolean | null>(null);
 
   useEffect(() => {
     getSetting("ffmpeg_path").then((v) => {
       if (v) setFfmpegPath(v);
+    }).catch(() => {});
+    getSetting("ace_step_url").then((v) => {
+      if (v) setAceStepUrl(v);
     }).catch(() => {});
   }, []);
 
   const saveFfmpegPath = (path: string) => {
     setFfmpegPath(path);
     setSetting("ffmpeg_path", path).catch(() => {});
+  };
+
+  const saveAceStepUrl = (url: string) => {
+    setAceStepUrl(url);
+    setAceStepTestResult(null);
+    setSetting("ace_step_url", url).catch(() => {});
+  };
+
+  const testConnection = async () => {
+    setAceStepTesting(true);
+    setAceStepTestResult(null);
+    try {
+      const ok = await apiInvoke<boolean>("acestep_health");
+      setAceStepTestResult(ok);
+    } catch {
+      setAceStepTestResult(false);
+    } finally {
+      setAceStepTesting(false);
+    }
   };
 
   return (
@@ -93,6 +119,31 @@ export default function SettingsPage() {
                   </a>
                   , распакуйте и укажите путь к ffmpeg.exe в папке bin
                 </p>
+              </div>
+              <div>
+                <label className="mb-2 block text-sm">{t("aceStepUrl")}</label>
+                <div className="flex gap-2">
+                  <input
+                    value={aceStepUrl}
+                    onChange={(e) => saveAceStepUrl(e.target.value)}
+                    placeholder="http://localhost:8001"
+                    className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-600 outline-none focus:border-violet-500"
+                  />
+                  <button
+                    onClick={testConnection}
+                    disabled={aceStepTesting}
+                    className="rounded-lg bg-violet-600 px-4 py-2 text-sm text-white transition-colors hover:bg-violet-700 disabled:opacity-50"
+                  >
+                    {aceStepTesting ? t("aceStepTesting") : t("aceStepTest")}
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-zinc-600">{t("aceStepUrlDesc")}</p>
+                {aceStepTestResult === true && (
+                  <p className="mt-1 text-xs text-green-400">{t("aceStepTestOk")}</p>
+                )}
+                {aceStepTestResult === false && (
+                  <p className="mt-1 text-xs text-red-400">{t("aceStepTestFail")}</p>
+                )}
               </div>
               <div>
                 <p className="mb-2 text-sm text-zinc-400">{t("resetKeyDesc")}</p>

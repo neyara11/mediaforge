@@ -56,4 +56,7 @@ export interface AudioGenerationResult {
   audio_base64: string;
   audio_format: "mp3" | "wav";
   cost: number | null;
+  provider?: "routerai" | "acestep";
+  metas?: Record<string, unknown>;
+  task_id?: string;
 }

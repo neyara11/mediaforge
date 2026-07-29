@@ -11,14 +11,16 @@ import settingsRu from "./locales/ru/settings.json";
 import settingsEn from "./locales/en/settings.json";
 import editorRu from "./locales/ru/editor.json";
 import editorEn from "./locales/en/editor.json";
+import musicRu from "./locales/ru/music.json";
+import musicEn from "./locales/en/music.json";
 
 i18n
   .use(LanguageDetector)
   .use(initReactI18next)
   .init({
     resources: {
-      ru: { common: commonRu, onboarding: onboardingRu, models: modelsRu, settings: settingsRu, editor: editorRu },
-      en: { common: commonEn, onboarding: onboardingEn, models: modelsEn, settings: settingsEn, editor: editorEn },
+      ru: { common: commonRu, onboarding: onboardingRu, models: modelsRu, settings: settingsRu, editor: editorRu, music: musicRu },
+      en: { common: commonEn, onboarding: onboardingEn, models: modelsEn, settings: settingsEn, editor: editorEn, music: musicEn },
     },
     fallbackLng: "ru",
     defaultNS: "common",

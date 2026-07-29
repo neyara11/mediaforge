@@ -1,0 +1,100 @@
+{
+  "provider": {
+    "label": "Провайдер",
+    "routerai": "RouterAI",
+    "acestep": "ACE-Step"
+  },
+  "taskTypes": {
+    "text2music": "Текст в музыку",
+    "text2musicDesc": "Создать музыку по текстовому описанию",
+    "cover": "Кавер",
+    "coverDesc": "Перепеть исходное аудио новым голосом/стилем",
+    "repaint": "Перерисовка",
+    "repaintDesc": "Заменить фрагмент аудио",
+    "extract": "Извлечь стемы",
+    "extractDesc": "Выделить отдельные дорожки инструментов",
+    "complete": "Аранжировка",
+    "completeDesc": "Добавить инструменты к вокальной дорожке"
+  },
+  "stems": {
+    "selectAll": "Выбрать все",
+    "vocals": "Вокал",
+    "backing_vocals": "Бэк-вокал",
+    "drums": "Барабаны",
+    "bass": "Бас",
+    "guitar": "Гитара",
+    "keyboard": "Клавишные",
+    "percussion": "Перкуссия",
+    "strings": "Струнные",
+    "synth": "Синтезатор",
+    "fx": "Эффекты",
+    "brass": "Духовые",
+    "woodwinds": "Деревянные духовые"
+  },
+  "form": {
+    "advancedToggle": "Расширенные настройки",
+    "duration": "Длительность (с)",
+    "bpm": "BPM",
+    "key": "Тональность",
+    "timeSignature": "Размер",
+    "vocalLanguage": "Язык вокала",
+    "batchSize": "Размер батча",
+    "randomSeed": "Случайный seed",
+    "fixedSeed": "Seed",
+    "audioFormat": "Аудио формат",
+    "referenceAudio": "Референс (стиль)",
+    "sourceAudio": "Исходное аудио",
+    "coverStrength": "Сила кавера",
+    "repaintStart": "Начало (с)",
+    "repaintEnd": "Конец (с, -1 = хвост)",
+    "useCurrentTrack": "Текущий трек",
+    "chooseFile": "Выбрать файл",
+    "noFileChosen": "Файл не выбран",
+    "model": "Модель"
+  },
+  "statuses": {
+    "submitting": "Отправка...",
+    "generating": "Генерация... (попытка {{attempt}}, {{done}}/{{total}})",
+    "downloading": "Загрузка..."
+  },
+  "errors": {
+    "notReachable": "ACE-Step недоступен",
+    "serverBusy": "Сервер занят (очередь полна)",
+    "needSrcAudio": "Для этого режима нужно исходное аудио",
+    "needStems": "Выберите хотя бы один стем",
+    "needCompleteTracks": "Выберите хотя бы один инструмент для аранжировки",
+    "needBaseModel": "Требуется acestep-v15-base на сервере",
+    "setAceStepUrl": "Укажите URL ACE-Step в настройках",
+    "generationFailed": "Ошибка генерации: {{error}}"
+  },
+  "vocalLanguages": {
+    "auto": "Авто / неизвестно",
+    "ru": "Русский",
+    "en": "English",
+    "es": "Español",
+    "de": "Deutsch",
+    "fr": "Français",
+    "ja": "日本語",
+    "zh": "中文",
+    "ko": "한국어"
+  },
+  "keys": {
+    "auto": "Авто",
+    "C_Major": "До мажор",
+    "Am": "Ля минор",
+    "G_Major": "Соль мажор",
+    "Em": "Ми минор",
+    "D_Major": "Ре мажор",
+    "Bm": "Си минор",
+    "F_Major": "Фа мажор",
+    "Dm": "Ре минор",
+    "A_Major": "Ля мажор",
+    "Fsharp_m": "Фа# минор"
+  },
+  "timeSignatures": {
+    "2/4": "2/4",
+    "3/4": "3/4",
+    "4/4": "4/4",
+    "6/8": "6/8"
+  }
+}

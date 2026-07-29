@@ -8,5 +8,11 @@
   "resetKeyDesc": "Remove saved key and reconfigure",
   "reset": "Reset",
   "interface": "Interface",
-  "api": "API & Limits"
+  "api": "API & Limits",
+  "aceStepUrl": "ACE-Step URL",
+  "aceStepUrlDesc": "Local ACE-Step REST API URL (default port 8001)",
+  "aceStepTest": "Test Connection",
+  "aceStepTesting": "Testing...",
+  "aceStepTestOk": "Connected successfully",
+  "aceStepTestFail": "Connection failed"
 }

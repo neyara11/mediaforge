@@ -92,6 +92,12 @@ pub fn run() {
             commands::editor::save_editor_project,
             commands::editor::load_editor_project,
             commands::editor::export_canvas_image,
+            commands::acestep::acestep_health,
+            commands::acestep::acestep_models,
+            commands::acestep::acestep_generate,
+            commands::acestep::acestep_poll,
+            commands::acestep::acestep_download_audio,
+            commands::acestep::acestep_stage_audio,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

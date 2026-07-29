@@ -1,0 +1,100 @@
+{
+  "provider": {
+    "label": "Provider",
+    "routerai": "RouterAI",
+    "acestep": "ACE-Step"
+  },
+  "taskTypes": {
+    "text2music": "Text to Music",
+    "text2musicDesc": "Generate music from text prompt",
+    "cover": "Cover",
+    "coverDesc": "Re-sing source audio with a new voice/style",
+    "repaint": "Repaint",
+    "repaintDesc": "Replace a section of audio",
+    "extract": "Extract Stems",
+    "extractDesc": "Isolate individual instrument tracks",
+    "complete": "Complete Arrangement",
+    "completeDesc": "Add instruments to a vocal track"
+  },
+  "stems": {
+    "selectAll": "Select All",
+    "vocals": "Vocals",
+    "backing_vocals": "Backing Vocals",
+    "drums": "Drums",
+    "bass": "Bass",
+    "guitar": "Guitar",
+    "keyboard": "Keyboard",
+    "percussion": "Percussion",
+    "strings": "Strings",
+    "synth": "Synth",
+    "fx": "FX",
+    "brass": "Brass",
+    "woodwinds": "Woodwinds"
+  },
+  "form": {
+    "advancedToggle": "Advanced Settings",
+    "duration": "Duration (s)",
+    "bpm": "BPM",
+    "key": "Key / Tonality",
+    "timeSignature": "Time Signature",
+    "vocalLanguage": "Vocal Language",
+    "batchSize": "Batch Size",
+    "randomSeed": "Random Seed",
+    "fixedSeed": "Seed",
+    "audioFormat": "Audio Format",
+    "referenceAudio": "Reference Audio (style)",
+    "sourceAudio": "Source Audio",
+    "coverStrength": "Cover Strength",
+    "repaintStart": "Start (s)",
+    "repaintEnd": "End (s, -1 = tail)",
+    "useCurrentTrack": "Use Current Track",
+    "chooseFile": "Choose File",
+    "noFileChosen": "No file chosen",
+    "model": "Model"
+  },
+  "statuses": {
+    "submitting": "Submitting...",
+    "generating": "Generating... (attempt {{attempt}}, {{done}}/{{total}})",
+    "downloading": "Downloading..."
+  },
+  "errors": {
+    "notReachable": "ACE-Step not reachable",
+    "serverBusy": "Server busy (queue full)",
+    "needSrcAudio": "Source audio is required for this task type",
+    "needStems": "Select at least one stem to extract",
+    "needCompleteTracks": "Select at least one instrument for the arrangement",
+    "needBaseModel": "Requires acestep-v15-base on the server",
+    "setAceStepUrl": "Set ACE-Step URL in Settings",
+    "generationFailed": "Generation failed: {{error}}"
+  },
+  "vocalLanguages": {
+    "auto": "Auto / Unknown",
+    "ru": "Russian",
+    "en": "English",
+    "es": "Spanish",
+    "de": "German",
+    "fr": "French",
+    "ja": "Japanese",
+    "zh": "Chinese",
+    "ko": "Korean"
+  },
+  "keys": {
+    "auto": "Auto",
+    "C_Major": "C Major",
+    "Am": "Am",
+    "G_Major": "G Major",
+    "Em": "Em",
+    "D_Major": "D Major",
+    "Bm": "Bm",
+    "F_Major": "F Major",
+    "Dm": "Dm",
+    "A_Major": "A Major",
+    "Fsharp_m": "F#m"
+  },
+  "timeSignatures": {
+    "2/4": "2/4",
+    "3/4": "3/4",
+    "4/4": "4/4",
+    "6/8": "6/8"
+  }
+}

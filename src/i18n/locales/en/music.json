@@ -33,6 +33,7 @@
   },
   "form": {
     "advancedToggle": "Advanced Settings",
+    "autoEnhancePrompt": "Auto-enhance prompt (translate to English)",
     "duration": "Duration (s)",
     "bpm": "BPM",
     "key": "Key / Tonality",
@@ -65,7 +66,9 @@
     "needCompleteTracks": "Select at least one instrument for the arrangement",
     "needBaseModel": "Requires acestep-v15-base on the server",
     "setAceStepUrl": "Set ACE-Step URL in Settings",
-    "generationFailed": "Generation failed: {{error}}"
+    "generationFailed": "Generation failed: {{error}}",
+    "downloadFailed": "Download failed",
+    "downloadUnavailable": "Audio file unavailable"
   },
   "vocalLanguages": {
     "auto": "Auto / Unknown",

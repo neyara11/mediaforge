@@ -19,6 +19,7 @@ import type {
   AceStepPollItem,
 } from "../../api/endpoints/acestep";
 import { planAceStepMusic } from "./aceStepPlanner";
+import type { AceStepPlan } from "./aceStepPlanner";
 import PromptBuilder from "../prompt-builder/PromptBuilderPanel";
 import { cn, generateId } from "../../shared/utils";
 import {
@@ -189,6 +190,7 @@ export default function MusicStudioPage() {
   const [selectedStems, setSelectedStems] = useState<string[]>([]);
   const [statusText, setStatusText] = useState<string | null>(null);
   const [aceModelsLive, setAceModelsLive] = useState(false);
+  const [autoEnhancePrompt, setAutoEnhancePrompt] = useState(true);
 
   const hasBaseModel = aceModelsLive && aceModels.some((m) => m.name.includes("-base"));
 
@@ -487,7 +489,11 @@ export default function MusicStudioPage() {
 
   const handleDownload = useCallback(async () => {
     const track = currentTrackRef.current;
-    if (!track || (!track.mediaPath && !track.audioBase64)) return;
+    if (!track) return;
+    if (!track.mediaPath && !track.audioBase64) {
+      setError(t("errors.downloadUnavailable"));
+      return;
+    }
 
     const ext = track.audioFormat === "wav" ? "wav" : "mp3";
     const defaultName = `${track.name.replace(/[^a-zA-Zа-яА-Я0-9 _-]/g, "")}.${ext}`;
@@ -500,20 +506,32 @@ export default function MusicStudioPage() {
           extensions: [ext],
         }],
       });
-      if (filePath) {
-        if (track.mediaPath) {
+      if (!filePath) return;
+
+      if (track.mediaPath) {
+        try {
           await exportMediaFile(track.mediaPath, filePath);
-        } else {
-          await invoke("save_base64_file", {
-            base64Data: track.audioBase64,
-            filePath,
-          });
+        } catch (copyError) {
+          if (track.audioBase64) {
+            await invoke("save_base64_file", {
+              base64Data: track.audioBase64,
+              filePath,
+            });
+          } else {
+            throw copyError;
+          }
         }
+      } else {
+        await invoke("save_base64_file", {
+          base64Data: track.audioBase64,
+          filePath,
+        });
       }
     } catch (e) {
       console.error("Download failed:", e);
+      setError(`${t("errors.downloadFailed")}: ${e}`);
     }
-  }, []);
+  }, [t]);
 
   const handleDeleteTrack = useCallback(async (trackId: string) => {
     try {
@@ -622,7 +640,7 @@ export default function MusicStudioPage() {
         let planDuration: number | undefined;
         let planVocalLanguage: string | undefined;
 
-        if (taskType === "text2music" || taskType === "complete") {
+        if (taskType !== "extract" && autoEnhancePrompt) {
           try {
             const plan = await planAceStepMusic(prompt, lyrics, textModel.defaultModel);
             planCaption = plan.caption;
@@ -636,7 +654,7 @@ export default function MusicStudioPage() {
           }
         }
 
-        const mergedCaption = taskType === "text2music" ? (planCaption ?? prompt) : prompt;
+        const mergedCaption = taskType !== "extract" ? (planCaption ?? prompt) : prompt;
         const mergedBpm = aceBpm ? Number(aceBpm) : planBpm;
         const mergedKeyScale = aceKeyScale || planKeyScale;
         const mergedTimeSignature = aceTimeSignature || planTimeSignature;
@@ -1132,6 +1150,16 @@ export default function MusicStudioPage() {
               </div>
               {showAdvanced && (
                 <div className="mt-2 grid grid-cols-3 gap-x-3 gap-y-2">
+                  <label className="col-span-3 flex items-center gap-1.5 text-xs text-zinc-500">
+                    <input
+                      type="checkbox"
+                      checked={autoEnhancePrompt}
+                      onChange={(e) => setAutoEnhancePrompt(e.target.checked)}
+                      disabled={loading}
+                      className="accent-violet-500"
+                    />
+                    {t("form.autoEnhancePrompt")}
+                  </label>
                   {taskType === "text2music" && (
                     <>
                       <label className="flex flex-col gap-0.5 text-xs text-zinc-500">
@@ -1569,11 +1597,20 @@ export default function MusicStudioPage() {
       {showPromptBuilder && (
         <div className="w-80 shrink-0">
           <PromptBuilder
-            mode="lyrics"
+            mode={provider === "acestep" ? "acestep" : "lyrics"}
             onUsePrompt={(p) => {
               setPrompt(p);
               setShowPromptBuilder(false);
             }}
+            onUsePlan={provider === "acestep" ? (plan: AceStepPlan) => {
+              setPrompt(plan.caption);
+              if (plan.lyrics) setLyrics(plan.lyrics);
+              if (plan.bpm) setAceBpm(String(plan.bpm));
+              if (plan.key_scale) setAceKeyScale(plan.key_scale);
+              if (plan.time_signature) setAceTimeSignature(plan.time_signature);
+              if (plan.vocal_language) setAceVocalLanguage(plan.vocal_language);
+              setShowPromptBuilder(false);
+            } : undefined}
           />
         </div>
       )}

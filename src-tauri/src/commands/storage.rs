@@ -103,7 +103,7 @@ pub async fn delete_media_file(
     path: String,
 ) -> Result<(), String> {
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let media_root = app_dir.join("media");
+    let media_root = app_dir.join("media").canonicalize().map_err(|e| e.to_string())?;
     let requested = std::path::Path::new(&path);
     let canonical = requested
         .canonicalize()
@@ -125,7 +125,12 @@ pub async fn export_media_file(
     src_path: String,
     dest_path: String,
 ) -> Result<(), String> {
-    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
     let requested = std::path::Path::new(&src_path);
     let canonical = requested
         .canonicalize()

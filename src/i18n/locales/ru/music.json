@@ -33,6 +33,7 @@
   },
   "form": {
     "advancedToggle": "Расширенные настройки",
+    "autoEnhancePrompt": "Авто-улучшение промпта (перевод на английский)",
     "duration": "Длительность (с)",
     "bpm": "BPM",
     "key": "Тональность",
@@ -65,7 +66,9 @@
     "needCompleteTracks": "Выберите хотя бы один инструмент для аранжировки",
     "needBaseModel": "Требуется acestep-v15-base на сервере",
     "setAceStepUrl": "Укажите URL ACE-Step в настройках",
-    "generationFailed": "Ошибка генерации: {{error}}"
+    "generationFailed": "Ошибка генерации: {{error}}",
+    "downloadFailed": "Ошибка скачивания",
+    "downloadUnavailable": "Аудиофайл недоступен"
   },
   "vocalLanguages": {
     "auto": "Авто / неизвестно",

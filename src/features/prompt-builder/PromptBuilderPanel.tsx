@@ -3,11 +3,13 @@ import { Sparkles, Wand2, ChevronDown, ChevronUp, Copy, Check } from "lucide-rea
 import { chatCompletion } from "../../api/endpoints/chat";
 import { useDefaultModel } from "../../shared/useDefaultModel";
 import { buildLyricsSystemPrompt } from "../../shared/lyricsPrompt";
+import { planAceStepMusicFull, type AceStepPlan } from "../music-studio/aceStepPlanner";
 import type { ChatMessage } from "../../api/types";
 
 interface PromptBuilderProps {
-  mode: "image" | "video" | "lyrics";
+  mode: "image" | "video" | "lyrics" | "acestep";
   onUsePrompt: (prompt: string) => void;
+  onUsePlan?: (plan: AceStepPlan) => void;
 }
 
 const SYSTEM_PROMPTS: Record<string, string> = {
@@ -44,10 +46,11 @@ const getSystemPrompt = (mode: string): string => {
   return SYSTEM_PROMPTS[mode];
 };
 
-export default function PromptBuilder({ mode, onUsePrompt }: PromptBuilderProps) {
+export default function PromptBuilder({ mode, onUsePrompt, onUsePlan }: PromptBuilderProps) {
   const { defaultModel } = useDefaultModel("text");
   const [input, setInput] = useState("");
   const [generated, setGenerated] = useState("");
+  const [plan, setPlan] = useState<AceStepPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(true);
@@ -65,19 +68,26 @@ export default function PromptBuilder({ mode, onUsePrompt }: PromptBuilderProps)
     setLoading(true);
     setError(null);
     try {
-      const messages: ChatMessage[] = [
-        { role: "system", content: getSystemPrompt(mode) },
-        { role: "user", content: input },
-      ];
-      const result = await chatCompletion({
-        messages,
-        model: defaultModel,
-        modalities: ["text"],
-      });
-      const parsed = JSON.parse(result);
-      const text =
-        parsed?.choices?.[0]?.message?.content || parsed?.content || result;
-      setGenerated(text);
+      if (mode === "acestep") {
+        const result = await planAceStepMusicFull(input, defaultModel);
+        setPlan(result);
+        setGenerated("");
+      } else {
+        const messages: ChatMessage[] = [
+          { role: "system", content: getSystemPrompt(mode) },
+          { role: "user", content: input },
+        ];
+        const result = await chatCompletion({
+          messages,
+          model: defaultModel,
+          modalities: ["text"],
+        });
+        const parsed = JSON.parse(result);
+        const text =
+          parsed?.choices?.[0]?.message?.content || parsed?.content || result;
+        setGenerated(text);
+        setPlan(null);
+      }
       setExpanded(true);
     } catch (e) {
       setError(String(e));
@@ -111,9 +121,11 @@ export default function PromptBuilder({ mode, onUsePrompt }: PromptBuilderProps)
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={
-              mode === "lyrics"
-                ? "Опишите тему песни..."
-                : "Опишите, что вы хотите создать..."
+              mode === "acestep"
+                ? "Опишите идею песни или вставьте свои стихи..."
+                : mode === "lyrics"
+                  ? "Опишите тему песни..."
+                  : "Опишите, что вы хотите создать..."
             }
             rows={3}
             className="w-full resize-none rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-violet-500"
@@ -133,7 +145,35 @@ export default function PromptBuilder({ mode, onUsePrompt }: PromptBuilderProps)
             </div>
           )}
 
-          {generated && (
+          {plan && mode === "acestep" && (
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs text-zinc-500">Generated Plan</span>
+              </div>
+              <div className="mb-2 text-xs text-zinc-500">Caption</div>
+              <pre className="whitespace-pre-wrap text-sm text-zinc-300">{plan.caption}</pre>
+              {plan.lyrics && (
+                <>
+                  <div className="mb-2 mt-3 text-xs text-zinc-500">Lyrics</div>
+                  <pre className="whitespace-pre-wrap text-sm text-zinc-400">{plan.lyrics}</pre>
+                </>
+              )}
+              <button
+                onClick={() => {
+                  if (onUsePlan) {
+                    onUsePlan(plan);
+                  } else {
+                    onUsePrompt(plan.caption);
+                  }
+                }}
+                className="mt-3 w-full rounded-lg bg-emerald-600/20 px-3 py-2 text-sm text-emerald-400 transition-colors hover:bg-emerald-600/30"
+              >
+                Use this prompt
+              </button>
+            </div>
+          )}
+
+          {generated && mode !== "acestep" && (
             <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-xs text-zinc-500">Generated Prompt</span>

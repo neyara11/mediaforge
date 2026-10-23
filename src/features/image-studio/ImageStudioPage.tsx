@@ -41,12 +41,36 @@ function fileToBase64(file: File): Promise<ReferenceImage> {
   });
 }
 
+const FLUX3_ASPECT_RATIOS = [
+  "auto", "1:1", "21:9", "2:1", "16:9", "3:2", "7:5", "4:3", "5:4",
+  "4:5", "3:4", "5:7", "2:3", "9:16", "1:2", "9:21",
+];
+
+function getModelCaps(model: string) {
+  const m = model.toLowerCase();
+  const isDalle = m.includes("dall-e") || m.includes("gpt-image");
+  const isSeed = m.includes("seed") || m.includes("seedream");
+  const isFlux3 = m.includes("flux-3-image") || m.includes("flux.3-image");
+  return {
+    supportsQuality: isDalle,
+    supportsAspectRatio: isFlux3,
+    maxN: isDalle ? 4 : 1,
+    sizeOptions: isFlux3
+      ? ["768", "1K", "1.5K", "2K", "4K"]
+      : isSeed
+        ? ["1920x1920", "2048x2048", "2304x1728", "1728x2304"]
+        : ["1024x1024", "1792x1024", "1024x1792"],
+    defaultSize: isFlux3 ? "1K" : isSeed ? "1920x1920" : "1024x1024",
+  };
+}
+
 export default function ImageStudioPage() {
   const { t } = useTranslation("editor");
   const navigate = useNavigate();
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState("1024x1024");
   const [quality, setQuality] = useState("auto");
+  const [aspectRatio, setAspectRatio] = useState("1:1");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<ImageResult[]>([]);
   const [selected, setSelected] = useState<ImageResult | null>(null);
@@ -59,19 +83,13 @@ export default function ImageStudioPage() {
 
   const { defaultModel, setDefaultModel, availableModels } = useDefaultModel("image");
 
-  const modelCaps = useMemo(() => {
-    const m = defaultModel.toLowerCase();
-    const isDalle = m.includes("dall-e") || m.includes("gpt-image");
-    const isSeed = m.includes("seed") || m.includes("seedream");
-    return {
-      supportsQuality: isDalle,
-      maxN: isDalle ? 4 : 1,
-      sizeOptions: isSeed
-        ? ["1920x1920", "2048x2048", "2304x1728", "1728x2304"]
-        : ["1024x1024", "1792x1024", "1024x1792"],
-      defaultSize: isSeed ? "1920x1920" : "1024x1024",
-    };
-  }, [defaultModel]);
+  const modelCaps = useMemo(() => getModelCaps(defaultModel), [defaultModel]);
+
+  useEffect(() => {
+    setSize((prev) =>
+      modelCaps.sizeOptions.includes(prev) ? prev : modelCaps.defaultSize,
+    );
+  }, [modelCaps]);
 
   const imageN = modelCaps.maxN >= 4 ? 4 : 1;
 
@@ -116,9 +134,7 @@ export default function ImageStudioPage() {
     setDefaultModel(newModel);
     setSetting("default_image_model", newModel).catch(() => {});
     // Reset size to a value valid for the newly selected model
-    const m = newModel.toLowerCase();
-    const isSeed = m.includes("seed") || m.includes("seedream");
-    setSize(isSeed ? "1920x1920" : "1024x1024");
+    setSize(getModelCaps(newModel).defaultSize);
   };
 
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -160,12 +176,24 @@ export default function ImageStudioPage() {
         n: imageN,
         size,
         quality,
+        aspect_ratio: modelCaps.supportsAspectRatio ? aspectRatio : undefined,
         input_references: inputRefs,
       });
       const parsed = JSON.parse(result);
+      if (parsed?.error) {
+        const message =
+          typeof parsed.error === "string"
+            ? parsed.error
+            : (parsed.error?.message ?? JSON.stringify(parsed.error));
+        throw new Error(message);
+      }
+      const data: { b64_json?: string }[] = parsed?.data ?? [];
+      if (data.length === 0) {
+        throw new Error(t("studio.emptyResponse"));
+      }
       const genId = generateId();
-      const images: ImageResult[] = (parsed?.data ?? []).map(
-        (d: { b64_json?: string }, idx: number) => ({
+      const images: ImageResult[] = data.map(
+        (d, idx) => ({
           id: generateId(),
           b64: d.b64_json ?? "",
           model: defaultModel,
@@ -322,6 +350,18 @@ export default function ImageStudioPage() {
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
+            {modelCaps.supportsAspectRatio && (
+              <select
+                value={aspectRatio}
+                onChange={(e) => setAspectRatio(e.target.value)}
+                title={t("studio.aspectRatio")}
+                className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-white outline-none"
+              >
+                {FLUX3_ASPECT_RATIOS.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            )}
             {modelCaps.supportsQuality && (
               <select
                 value={quality}

@@ -9,6 +9,7 @@ export interface ImageGenerationParams {
   n?: number;
   size?: string;
   quality?: string;
+  aspect_ratio?: string;
   input_references?: ImageReference[];
 }
 

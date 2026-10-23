@@ -229,7 +229,24 @@ pub async fn api_post(
                     return Err(format!("API error {}: {}", status, body));
                 }
 
-                resp.text().await.map_err(|e| e.to_string())
+                let text = resp.text().await.map_err(|e| e.to_string())?;
+
+                // RouterAI can report request errors inside a 200 response body:
+                // {"error": {"message": "...", "code": 400}}
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Some(err) = value.get("error") {
+                        if !err.is_null() {
+                            let msg = err
+                                .get("message")
+                                .and_then(|m| m.as_str())
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| err.to_string());
+                            return Err(format!("API error: {}", msg));
+                        }
+                    }
+                }
+
+                Ok(text)
             }
         },
         3,
